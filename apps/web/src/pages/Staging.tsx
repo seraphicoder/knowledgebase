@@ -146,8 +146,9 @@ export function Staging() {
 
       {runResult && (
         <div className="mb-4 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
-          Pipeline run: {runResult.extracted} extracted, {runResult.skippedLowRelevance} low-relevance,{' '}
-          {runResult.skippedDuplicate} duplicate, {runResult.errored} errored (of {runResult.considered} approved).{' '}
+          Pipeline run: <strong>{runResult.extracted} draft{runResult.extracted === 1 ? '' : 's'}</strong> created from{' '}
+          {runResult.considered} approved thread{runResult.considered === 1 ? '' : 's'} — {runResult.skippedLowRelevance} low-relevance,{' '}
+          {runResult.skippedDuplicate} duplicate, {runResult.skippedNoKnowledge} no reusable knowledge, {runResult.errored} errored.{' '}
           {runResult.extracted > 0 && (
             <Link to="/review" className="font-medium underline">Review drafts →</Link>
           )}

@@ -214,20 +214,25 @@ limit 5;
 
 ## AI Extraction Layer (Claude API)
 
-Each processed thread is sent to Claude with a structured prompt that extracts:
+A single support thread often covers **multiple distinct issues** (e.g. a printer ticket discussing banding, tray drainage, and a printhead swap in one conversation). So each processed thread is sent to Claude and yields an **array of entries — one per distinct issue that has a documented, reusable resolution** (possibly empty if none). Unresolved issues, clarifying-question-only exchanges, and one-off miscommunications are skipped.
 
 ```json
 {
-  "question": "What is the core question being asked?",
-  "answer": "What is the authoritative answer given?",
-  "category": "Suggested KB category",
-  "title": "Suggested article title",
-  "tags": ["tag1", "tag2"],
-  "confidence": 0.0-1.0,
-  "caveats": "Any nuance, exceptions, or version-specific notes",
-  "source_thread_id": "internal reference"
+  "extractions": [
+    {
+      "question": "What is the core question being asked?",
+      "answer": "What is the authoritative answer given?",
+      "category": "Suggested KB category",
+      "title": "Suggested article title",
+      "tags": ["tag1", "tag2"],
+      "confidence": 0.0-1.0,
+      "caveats": "Any nuance, exceptions, or version-specific notes"
+    }
+  ]
 }
 ```
+
+Each returned entry becomes its own `extractions` row (with its own embedding) for independent review. A thread that yields zero entries is marked `skipped` (reason `no_reusable_knowledge`).
 
 **Model strategy:**
 - `claude-haiku` — relevance scoring and noise filtering (high volume, low cost)

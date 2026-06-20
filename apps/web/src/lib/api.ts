@@ -86,7 +86,8 @@ export interface PipelineStats {
   embedded: number;
   skippedLowRelevance: number;
   skippedDuplicate: number;
-  extracted: number;
+  skippedNoKnowledge: number;
+  extracted: number; // total draft entries created (a thread can yield several)
   errored: number;
 }
 

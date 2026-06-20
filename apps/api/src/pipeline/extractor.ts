@@ -2,8 +2,10 @@ import { getAnthropic, MODELS } from '../lib/ai.js';
 import { withRetry, isRetryableHttpStatus } from '../lib/retry.js';
 import { extractJson } from './relevance-scorer.js';
 
-// Sonnet extraction pass. Returns a strictly-typed Q&A extraction. The system
-// prompt forces JSON-only output; parsing is defensive (try/catch + fallback).
+// Sonnet extraction pass. A single support thread often covers MULTIPLE distinct
+// issues, so this returns an ARRAY of Q&A entries — one per distinct issue that
+// has a documented, reusable resolution (possibly empty). The system prompt
+// forces JSON-only output; parsing is defensive (try/catch + fallback).
 
 export interface ExtractionResult {
   question: string;
@@ -16,16 +18,24 @@ export interface ExtractionResult {
 }
 
 const SYSTEM = `You extract reusable knowledge-base entries from support conversation threads.
-Read the thread and identify the core question and the authoritative answer.
-Return ONLY a valid JSON object with EXACTLY these keys, no markdown, no preamble:
+A single thread often covers MULTIPLE distinct issues. Identify EACH distinct problem that has a documented, authoritative resolution, and produce one entry per resolved issue.
+Rules:
+- Produce an entry ONLY for issues that have a clear, reusable answer/resolution.
+- Skip unresolved issues, clarifying-question-only exchanges, and one-off miscommunications.
+- If the thread contains no reusable resolved knowledge, return an empty array.
+Return ONLY valid JSON, no markdown, no preamble, in EXACTLY this shape:
 {
-  "question": string,
-  "answer": string,
-  "title": string,
-  "category": string,
-  "tags": string[],
-  "confidence": number,   // 0.0-1.0, your confidence this is accurate, reusable knowledge
-  "caveats": string | null // version-specific notes, exceptions, or null
+  "extractions": [
+    {
+      "question": string,
+      "answer": string,
+      "title": string,
+      "category": string,
+      "tags": string[],
+      "confidence": number,    // 0.0-1.0, your confidence this is accurate, reusable knowledge
+      "caveats": string | null // version-specific notes, exceptions, or null
+    }
+  ]
 }`;
 
 export class ExtractionParseError extends Error {
@@ -35,12 +45,12 @@ export class ExtractionParseError extends Error {
   }
 }
 
-export async function extractKnowledge(cleanedContent: string): Promise<ExtractionResult> {
+export async function extractKnowledge(cleanedContent: string): Promise<ExtractionResult[]> {
   const res = await withRetry(
     () =>
       getAnthropic().messages.create({
         model: MODELS.extraction,
-        max_tokens: 1500,
+        max_tokens: 4000, // room for several entries from a multi-issue thread
         system: SYSTEM,
         messages: [{ role: 'user', content: cleanedContent.slice(0, 30000) }],
       }),
@@ -53,25 +63,56 @@ export async function extractKnowledge(cleanedContent: string): Promise<Extracti
   );
 
   const text = res.content.find((b) => b.type === 'text')?.text ?? '';
-  return parseExtraction(text);
+  return parseExtractions(text);
 }
 
-// Exported for unit testing against mocked model output.
-export function parseExtraction(text: string): ExtractionResult {
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(extractJson(text)) as Record<string, unknown>;
-  } catch {
+// Exported for unit testing against mocked model output. Accepts the wrapper
+// object `{ "extractions": [...] }`, a bare array, or a single object (back-compat).
+// An empty array is valid (no reusable knowledge) — not a parse error.
+export function parseExtractions(text: string): ExtractionResult[] {
+  const parsed = tryParseJson(text);
+  if (parsed === undefined) throw new ExtractionParseError(text);
+
+  let list: unknown[];
+  if (Array.isArray(parsed)) {
+    list = parsed;
+  } else if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { extractions?: unknown }).extractions)) {
+    list = (parsed as { extractions: unknown[] }).extractions;
+  } else if (parsed && typeof parsed === 'object' && ('question' in parsed || 'answer' in parsed)) {
+    list = [parsed]; // single object, back-compat
+  } else {
     throw new ExtractionParseError(text);
   }
+
+  return list
+    .map(parseOne)
+    // Drop entries with no usable content (e.g. model emitted a placeholder).
+    .filter((e) => e.question.length > 0 || e.answer.length > 0);
+}
+
+function tryParseJson(text: string): unknown | undefined {
+  // Prefer the fenced/braced slice; fall back to raw (handles bare arrays, which
+  // extractJson's brace-trimming would otherwise mangle).
+  for (const candidate of [extractJson(text), text.trim()]) {
+    try {
+      return JSON.parse(candidate);
+    } catch {
+      // try next
+    }
+  }
+  return undefined;
+}
+
+function parseOne(raw: unknown): ExtractionResult {
+  const o = (raw ?? {}) as Record<string, unknown>;
   return {
-    question: str(parsed.question),
-    answer: str(parsed.answer),
-    title: str(parsed.title),
-    category: str(parsed.category),
-    tags: Array.isArray(parsed.tags) ? parsed.tags.filter((t): t is string => typeof t === 'string') : [],
-    confidence: clamp01(Number(parsed.confidence)),
-    caveats: typeof parsed.caveats === 'string' && parsed.caveats.length > 0 ? parsed.caveats : null,
+    question: str(o.question),
+    answer: str(o.answer),
+    title: str(o.title),
+    category: str(o.category),
+    tags: Array.isArray(o.tags) ? o.tags.filter((t): t is string => typeof t === 'string') : [],
+    confidence: clamp01(Number(o.confidence)),
+    caveats: typeof o.caveats === 'string' && o.caveats.length > 0 ? o.caveats : null,
   };
 }
 

@@ -13,8 +13,8 @@ export interface RelevanceResult {
 }
 
 const SYSTEM = `You score support conversation threads for knowledge-base value.
-A high score means the thread contains a clear QUESTION/problem AND an authoritative ANSWER/resolution that would be reusable knowledge.
-A low score means chit-chat, acknowledgements, unresolved threads, or no clear Q&A.
+A thread may cover SEVERAL issues. Score HIGH if AT LEAST ONE issue has a clear problem AND an authoritative, reusable resolution — even if other parts of the thread are unresolved, chit-chat, or acknowledgements.
+Score LOW only if NO issue in the thread has a reusable resolution (pure chit-chat/acknowledgements, or every issue is left unresolved).
 Respond with ONLY valid JSON: {"score": <0.0-1.0 number>, "skip_reason": <string or null>}.
 No markdown, no preamble.`;
 

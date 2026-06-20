@@ -20,14 +20,16 @@ export interface PipelineStats {
   embedded: number;
   skippedLowRelevance: number;
   skippedDuplicate: number;
-  extracted: number;
+  skippedNoKnowledge: number;
+  extracted: number; // total draft entries created (a thread can yield several)
   errored: number;
 }
 
 export async function runPipeline(orgId: string): Promise<PipelineStats> {
   const db = getServiceClient();
   const stats: PipelineStats = {
-    considered: 0, embedded: 0, skippedLowRelevance: 0, skippedDuplicate: 0, extracted: 0, errored: 0,
+    considered: 0, embedded: 0, skippedLowRelevance: 0, skippedDuplicate: 0,
+    skippedNoKnowledge: 0, extracted: 0, errored: 0,
   };
 
   // ── FIRST QUERY — the gate. approval_status='approved' is mandatory here. ──
@@ -84,38 +86,52 @@ export async function runPipeline(orgId: string): Promise<PipelineStats> {
           continue;
         }
 
-        // 4. Extract (Sonnet).
-        const extraction = await extractKnowledge(content);
-        const extractionEmbedding = await embedText(`${extraction.title}\n${extraction.question}\n${extraction.answer}`);
+        // 4. Extract (Sonnet) — may yield several Q&A entries for a multi-issue thread.
+        const extractions = await extractKnowledge(content);
+        if (extractions.length === 0) {
+          // Passed the gates but Sonnet found no reusable, resolved knowledge.
+          await markSkipped(orgId, id, 'no_reusable_knowledge', {});
+          stats.skippedNoKnowledge++;
+          continue;
+        }
 
-        const { data: inserted, error: insErr } = await db
-          .from('extractions')
-          .insert({
-            org_id: orgId,
-            thread_id: id,
-            question: extraction.question,
-            answer: extraction.answer,
-            title: extraction.title,
-            category: extraction.category,
-            tags: extraction.tags,
-            confidence: extraction.confidence,
-            caveats: extraction.caveats,
-            embedding: extractionEmbedding as unknown as string,
-            status: 'pending_review',
-            metadata: dedup.verdict === 'potential_merge'
-              ? { potential_merge: dedup.similarExtractionIds, topSimilarity: dedup.topSimilarity }
-              : {},
-          })
-          .select('id')
-          .single();
-        if (insErr) throw new Error(insErr.message);
+        const mergeMeta =
+          dedup.verdict === 'potential_merge'
+            ? { potential_merge: dedup.similarExtractionIds, topSimilarity: dedup.topSimilarity }
+            : {};
+
+        for (const extraction of extractions) {
+          const extractionEmbedding = await embedText(
+            `${extraction.title}\n${extraction.question}\n${extraction.answer}`,
+          );
+          const { data: inserted, error: insErr } = await db
+            .from('extractions')
+            .insert({
+              org_id: orgId,
+              thread_id: id,
+              question: extraction.question,
+              answer: extraction.answer,
+              title: extraction.title,
+              category: extraction.category,
+              tags: extraction.tags,
+              confidence: extraction.confidence,
+              caveats: extraction.caveats,
+              embedding: extractionEmbedding as unknown as string,
+              status: 'pending_review',
+              metadata: mergeMeta,
+            })
+            .select('id')
+            .single();
+          if (insErr) throw new Error(insErr.message);
+
+          await writeAudit({
+            orgId, userId: null, action: 'extraction.created', resource: 'extractions',
+            resourceId: inserted.id as string, metadata: { threadId: id },
+          });
+          stats.extracted++;
+        }
 
         await db.from('email_threads').update({ processing_status: 'extracted' }).eq('id', id);
-        await writeAudit({
-          orgId, userId: null, action: 'extraction.created', resource: 'extractions',
-          resourceId: inserted.id as string, metadata: { threadId: id },
-        });
-        stats.extracted++;
       } catch (err) {
         stats.errored++;
         const message = err instanceof Error ? err.message : String(err);

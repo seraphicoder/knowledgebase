@@ -471,7 +471,7 @@ Build these modules in `apps/api/src/pipeline/`:
 #### `extractor.ts`
 - Call Claude Sonnet with the cleaned thread content
 - System prompt must instruct Sonnet to return ONLY valid JSON — no markdown, no preamble
-- Extract and return this exact structure:
+- A thread can cover **multiple distinct issues**, so return an **array** of entries — one per distinct issue with a documented, reusable resolution (empty array if none). Skip unresolved/clarifying-only/one-off exchanges.
 
 ```typescript
 interface ExtractionResult {
@@ -483,12 +483,14 @@ interface ExtractionResult {
   confidence: number;      // 0.0–1.0
   caveats: string | null;
 }
+// extractKnowledge(content): Promise<ExtractionResult[]>
+// Model returns { "extractions": ExtractionResult[] }
 ```
 
-- Parse the JSON response safely — wrap in try/catch, fall back to error status if parse fails
-- Write the result to `extractions` table with status `pending_review`
-- Generate embedding for the extraction and store in `extractions.embedding`
-- Write an `audit_log` entry
+- Parse the JSON response safely — wrap in try/catch, fall back to error status if parse fails. An empty array is valid (no reusable knowledge), not an error.
+- Write **each** entry as its own row in `extractions` (status `pending_review`), each with its own embedding in `extractions.embedding`
+- A thread producing zero entries is marked `skipped` (reason `no_reusable_knowledge`)
+- Write an `audit_log` entry per created extraction
 
 #### `pipeline-runner.ts`
 - **First query, no exceptions:** `select * from email_threads where org_id = $1 and approval_status = 'approved' and processing_status = 'not_started'`. This is the enforcement point for the approval gate — do not query on `processing_status` alone, `approval_status = 'approved'` must always be in the where clause.

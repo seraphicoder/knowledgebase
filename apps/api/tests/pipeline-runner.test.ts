@@ -26,9 +26,10 @@ vi.mock('../src/pipeline/dedup-checker.js', () => ({
 }));
 vi.mock('../src/pipeline/extractor.js', () => ({
   ExtractionParseError: class extends Error {},
-  extractKnowledge: vi.fn(async () => ({
-    question: 'q', answer: 'a', title: 't', category: 'c', tags: [], confidence: 0.8, caveats: null,
-  })),
+  // Multi-Q&A: returns an array of entries per thread.
+  extractKnowledge: vi.fn(async () => [
+    { question: 'q', answer: 'a', title: 't', category: 'c', tags: [], confidence: 0.8, caveats: null },
+  ]),
 }));
 
 const { runPipeline } = await import('../src/pipeline/pipeline-runner.js');
