@@ -1,6 +1,9 @@
 import { supabase } from './supabase';
 
-const BASE = import.meta.env.VITE_API_BASE_URL;
+// Default to same-origin ('') when unset — the single-service deploy serves the
+// SPA and API from the same host, so relative '/api/...' is correct. Set
+// VITE_API_BASE_URL only when the API lives on a different origin.
+const BASE = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export interface StagedThread {
   id: string;
