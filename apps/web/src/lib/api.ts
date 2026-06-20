@@ -68,6 +68,15 @@ export function getThread(id: string): Promise<{ thread: ThreadDetail }> {
   return request(`/api/threads/${id}`);
 }
 
+export interface ApprovedThread extends StagedThread {
+  approved_at: string | null;
+  processing_status: string;
+}
+
+export function listApproved(): Promise<{ threads: ApprovedThread[]; total: number }> {
+  return request('/api/threads/approved');
+}
+
 export function approveBatch(threadIds: string[]): Promise<{ approved: number }> {
   return request('/api/threads/approve-batch', {
     method: 'POST',

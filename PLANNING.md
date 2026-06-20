@@ -326,7 +326,20 @@ Each returned entry becomes its own `extractions` row (with its own embedding) f
 | id | uuid | PK |
 | org_id | uuid | FK |
 | email | text | |
-| role | enum | `admin`, `reviewer`, `viewer` |
+| role | enum | `admin`, `reviewer`, `sme`, `viewer` |
+
+### `domain_facts`
+Org-authored grounding facts/rules injected into the extraction prompt so the AI uses the customer's truth instead of its assumptions (see [AI Extraction Layer](#ai-extraction-layer-claude-api)).
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| org_id | uuid | FK |
+| term | text | trigger keyword; injected only when it appears in a thread. `null` = global rule (always injected) |
+| fact | text | the authoritative fact/instruction |
+| active | boolean | toggled off without deleting |
+| created_by | uuid | FK → users |
+| created_at | timestamptz | |
+| updated_at | timestamptz | |
 
 ---
 
@@ -508,30 +521,37 @@ The longer a customer uses MailMind, the more accurate it becomes for their spec
 
 ## Phase 1 Build Plan
 
-### Milestone 1 — Ingestion Foundation
-- [ ] Connector interface / abstraction layer (`Connector`, `RawConversation`)
-- [ ] IMAP polling adapter (connect to intake mailbox)
-- [ ] Zendesk connector (REST API, ticket + comments polling)
-- [ ] Email thread reconstructor
-- [ ] Noise filter (signatures, footers, OOO detection)
-- [ ] Store cleaned threads in Supabase with `approval_status = 'staged'` — ingestion stops here, no AI calls
-- [ ] Staging view in the app — list pulled threads (subject, source, participant, date), no AI summary or score shown since none has been generated yet
-- [ ] Approval actions — approve individual thread / approve by date range / approve by source / "approve all in this batch" / exclude
+> **Status (current):** Milestones 1–3 built and deployed (single Railway service + Supabase). Plus, beyond the original plan: ingestion is **newest-first / resumable backfill**, the extractor is **multi-Q&A** (one thread → many drafts), and a **Domain Facts** grounding layer feeds the extraction prompt. Not yet built: similarity clustering, and Milestones 4–5.
 
-### Milestone 2 — AI Extraction Pipeline
-- [ ] Pipeline runner only ever queries threads where `approval_status = 'approved'` — this is the literal gate enforcement, not just a UI restriction
-- [ ] Embedding generation after noise filter (OpenAI `text-embedding-3-small`) — first AI-adjacent call in the pipeline, only fires post-approval
-- [ ] Relevance scorer (Haiku) — skip low-signal threads
-- [ ] Deduplication check via pgvector cosine similarity before Sonnet pass
-- [ ] Full extraction prompt (Sonnet) — structured JSON output
-- [ ] Similarity clustering — group related threads before extraction
-- [ ] Store extractions + embeddings in Supabase
+### Milestone 1 — Ingestion Foundation ✅
+- [x] Connector interface / abstraction layer (`Connector`, `RawConversation`)
+- [x] IMAP polling adapter (connect to intake mailbox)
+- [x] Zendesk connector (REST API, ticket + comments polling)
+- [x] Email thread reconstructor
+- [x] Noise filter (signatures, footers, OOO detection, HTML entities/tags)
+- [x] Store cleaned threads in Supabase with `approval_status = 'staged'` — ingestion stops here, no AI calls
+- [x] Staging view in the app — list pulled threads (subject, source, participant, date); sortable + searchable
+- [x] Approval actions — approve individual / by batch / exclude
 
-### Milestone 3 — Review UI
-- [ ] Review queue — list of pending extractions
-- [ ] Article editor — edit AI draft before approving
-- [ ] Approve / reject / skip actions
-- [ ] Basic category and tag management
+### Milestone 2 — AI Extraction Pipeline ✅ (clustering deferred)
+- [x] Pipeline runner only ever queries threads where `approval_status = 'approved'` — the literal gate enforcement, covered by a test
+- [x] Embedding generation after noise filter (OpenAI `text-embedding-3-small`) — only fires post-approval
+- [x] Relevance scorer (Haiku) — skip low-signal threads (scores high if ≥1 issue has a reusable resolution)
+- [x] Deduplication check via pgvector cosine similarity before Sonnet pass
+- [x] Full extraction prompt (Sonnet) — **multi-Q&A**: structured JSON array, one entry per distinct resolved issue
+- [ ] Similarity clustering — group related threads before extraction *(deferred)*
+- [x] Store extractions + embeddings in Supabase
+
+### Milestone 3 — Review UI ✅
+- [x] Review queue — list of pending extractions (`/review`)
+- [x] Article editor — edit AI draft before approving; source thread shown via `extractions.thread_id` FK
+- [x] Approve / reject actions
+- [x] Basic category and tag management (editable per draft)
+- [x] *(added)* Approved-threads tab (`/approved`) — view approved threads + pipeline status + original source
+
+### Beyond plan — Domain Facts ✅
+- [x] `domain_facts` table + RLS, CRUD API, management UI (`/facts`)
+- [x] Term-triggered + global facts injected into the extraction prompt as authoritative context
 
 ### Milestone 4 — KB Output
 - [ ] Internal KB viewer — semantic search powered by pgvector
@@ -723,4 +743,4 @@ Before pitching direct mailbox access to any customer:
 
 ---
 
-*Document version: 0.7 — Ingestion pulls newest-first with a resumable backwards backfill (cursor-based); replaces the forward incremental-export approach for initial ingestion*
+*Document version: 0.8 — Reflects shipped state: Milestones 1–3 built (ingestion + staging, multi-Q&A extraction pipeline, review queue), newest-first resumable backfill, and a Domain Facts grounding layer. Phase-1 build plan marked up to current status.*

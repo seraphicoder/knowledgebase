@@ -45,6 +45,7 @@ export function Review() {
         <div>
           <nav className="mb-2 flex gap-4 text-sm">
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
+            <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
             <span className="font-medium text-gray-900">Review</span>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
@@ -246,10 +247,13 @@ function ReviewDrawer({
             </div>
 
             {thread && (
-              <details className="mt-4">
-                <summary className="cursor-pointer text-sm font-medium text-gray-700">Source thread</summary>
-                <p className="mt-2 text-xs text-gray-500">{thread.subject}</p>
-                <pre className="mt-1 max-h-64 overflow-y-auto whitespace-pre-wrap rounded bg-gray-50 p-3 text-xs text-gray-700">
+              <details open className="mt-4 rounded border border-gray-200 p-3">
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                  Source thread — where this came from
+                </summary>
+                <p className="mt-2 text-xs font-medium text-gray-600">{thread.subject || '(no subject)'}</p>
+                <p className="text-xs text-gray-400">{thread.participants.join(', ')}</p>
+                <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap rounded bg-gray-50 p-3 text-xs text-gray-700">
                   {thread.raw_content || '(empty)'}
                 </pre>
               </details>

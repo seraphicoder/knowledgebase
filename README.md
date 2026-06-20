@@ -4,7 +4,7 @@ AI-powered knowledge extraction from email — turning support threads into a li
 
 > Full product spec: [PLANNING.md](PLANNING.md) · Build brief: [CLAUDE_CODE_KICKOFF.md](CLAUDE_CODE_KICKOFF.md)
 
-This repo contains **Phase 1, Milestones 1 & 2**: a pluggable connector framework (IMAP + Zendesk), thread reconstruction, noise filtering, a hard staging/approval gate, and the post-approval AI extraction pipeline (Claude Haiku + Sonnet, OpenAI embeddings, pgvector dedup).
+This repo implements **Phase 1 (Milestones 1–3)** plus a domain-grounding layer: a pluggable connector framework (IMAP + Zendesk), thread reconstruction, noise filtering, a hard staging/approval gate, the post-approval AI extraction pipeline (Claude Haiku + Sonnet, OpenAI embeddings, pgvector dedup) with **multi-Q&A extraction**, a **human review queue**, and org-authored **domain facts** that ground the AI. See [Status](#status) for the exact built/not-built breakdown.
 
 ## The one rule that matters most
 
@@ -16,13 +16,14 @@ This repo contains **Phase 1, Milestones 1 & 2**: a pluggable connector framewor
 apps/
   api/                 # Hono + TypeScript backend
     src/
-      pipeline/        # connectors, reconstructor, noise filter, store, AI stages, runner
-      routes/          # staging.ts (approval gate API), pipeline.ts (manual trigger)
+      pipeline/        # connectors, reconstructor, noise filter, store, AI stages, domain-facts, runner
+      routes/          # staging.ts (approval gate), pipeline.ts (trigger), review.ts (drafts), facts.ts (domain facts)
       lib/             # env, supabase, auth, audit, crypto, ai, retry, logger
-    scripts/test-ingest.ts
+    scripts/           # test-ingest.ts, set-source-credentials.ts
     tests/             # Vitest
-  web/                 # React + Vite + Tailwind (Staging review UI)
-supabase/migrations/   # 001 extensions, 002 tables, 003 RLS, 004 indexes, 005 match RPCs
+  web/                 # React + Vite + Tailwind
+    src/pages/         # Login, Staging, Approved, Review, Facts
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts
 ```
 
 ## Setup
@@ -127,6 +128,11 @@ multi-Q&A: one thread can yield several drafts, one per distinct resolved issue)
 and the Milestone 3 review queue — humans qualify AI-drafted extractions
 (`/review`: edit, then approve/reject) before they become KB articles. A
 "Process Approved Threads" button on `/staging` triggers the pipeline.
+
+UI tabs: `/staging` (sortable + searchable staged threads), `/approved`
+(read-only view of approved threads + pipeline status + original source),
+`/review` (qualify drafts; the source thread is shown via the
+`extractions.thread_id` FK), `/facts` (domain grounding facts).
 
 Domain Facts (`/facts`): org-authored authoritative facts/rules injected into the
 extraction prompt so the AI uses the customer's truth instead of its assumptions

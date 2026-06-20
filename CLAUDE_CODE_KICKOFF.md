@@ -1,6 +1,12 @@
 # MailMind — Claude Code Kickoff Prompt
 > Paste this entire document into Claude Code at the start of a new session.
 
+> **⚠️ This is the original build brief, not a status doc.** The app has since
+> progressed beyond this Phase-1 kickoff (Milestone 3 review queue, multi-Q&A
+> extraction, newest-first resumable ingestion, a Domain Facts grounding layer,
+> migration 007). For the **current state of the app, read [README.md](README.md)**;
+> for the architecture and build-plan status, see [PLANNING.md](PLANNING.md).
+
 ---
 
 ## Who You Are & What We're Building
@@ -357,6 +363,10 @@ create index on audit_log     (org_id, created_at);
 
 Adds `ingestion_sources.sync_cursor` (text) and `ingestion_sources.backfill_complete` (boolean) to support the newest-first backwards backfill (Architecture Rule #8). *(Shown inline in the `ingestion_sources` create table above for readability; in the repo these land as an additive migration.)*
 
+### Migration 007 — Domain facts
+
+Adds the `domain_facts` table (org-scoped, RLS) for the grounding layer: `term` (null = global rule), `fact`, `active`, `created_by`, timestamps. Active facts are injected into the extraction prompt — global ones always, term-triggered ones when the term appears in the thread.
+
 ### RLS helper functions (note)
 
 The org-isolation policies reference `SECURITY DEFINER` helper functions (`current_user_org()`, `current_user_role()`) so a policy on `users` can read `users` without infinite recursion. Use per-operation clauses — `with check` for INSERT/UPDATE, `using` for SELECT/DELETE — not a single `for all ... using` policy.
@@ -457,7 +467,7 @@ Build these modules in `apps/api/src/pipeline/`:
 
 #### `relevance-scorer.ts`
 - Call Claude Haiku with a focused prompt to score thread relevance
-- Prompt must determine: does this thread contain a question and an authoritative answer?
+- Prompt must determine: does this thread contain **at least one** clear problem with an authoritative, reusable resolution? (A multi-issue thread passes if any one issue is resolved — aligned with the multi-Q&A extractor.)
 - Output a `relevance_score` (0.0–1.0) and a `skip_reason` if below threshold
 - Threads below 0.40 relevance are marked `skipped` — do not proceed to Sonnet
 - This gate exists to save cost — Haiku is ~20x cheaper than Sonnet
@@ -586,7 +596,7 @@ Do not build any of the following in Phase 1 — they are Phase 2:
 1. Read `PLANNING.md` in full before writing any code
 2. Scaffold the monorepo structure
 3. Create `.env.example` and `.gitignore`
-4. Write and run all 6 Supabase migrations (001 extensions, 002 tables, 003 RLS, 004 indexes, 005 vector-match RPCs, 006 sync cursor)
+4. Write and run all 7 Supabase migrations (001 extensions, 002 tables, 003 RLS, 004 indexes, 005 vector-match RPCs, 006 sync cursor, 007 domain facts)
 5. Verify RLS policies are active on all tables
 6. Build the `Connector` interface, `RawConversation`, and `FetchPage` types first
 7. Build the Zendesk connector — it's the faster path to real test data since there's an existing Zendesk account available
@@ -609,4 +619,4 @@ If anything is ambiguous, ask before writing code. Specifically confirm:
 
 ---
 
-*Kickoff prompt version: 1.3 — Ingestion pulls newest-first with a resumable backwards backfill (cursor-based connector contract, `sync_cursor`/`backfill_complete`); replaces the forward incremental-export approach. Adds credential helper + `--limit` batching.*
+*Kickoff prompt version: 1.4 — Newest-first resumable backfill; multi-Q&A extraction (array per thread); migration 007 domain facts grounding layer; relevance gate aligned to "≥1 reusable resolution". Note: app has progressed past this Phase-1 brief — see README.md for current state.*

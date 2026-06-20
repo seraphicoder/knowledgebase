@@ -178,6 +178,7 @@ export function Staging() {
         <div>
           <nav className="mb-2 flex gap-4 text-sm">
             <span className="font-medium text-gray-900">Staging</span>
+            <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>

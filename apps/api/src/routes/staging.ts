@@ -48,6 +48,30 @@ staging.get('/threads/staged', async (c) => {
   return c.json({ threads: data ?? [], total: count ?? 0, limit, offset });
 });
 
+// ─── GET /api/threads/approved ──────────────────────────────
+// Approved threads leave the staging list, so this is where you see what's been
+// approved and its pipeline state (processing_status). Read-only.
+staging.get('/threads/approved', async (c) => {
+  const { orgId } = c.get('auth');
+  const db = getServiceClient();
+  const limit = Math.min(Number(c.req.query('limit') ?? 200), 500);
+  const offset = Number(c.req.query('offset') ?? 0);
+
+  const { data, error, count } = await db
+    .from('email_threads')
+    .select(
+      'id, source_id, external_thread_id, subject, participants, message_count, date_range_start, date_range_end, ingested_at, approved_at, processing_status',
+      { count: 'exact' },
+    )
+    .eq('org_id', orgId)
+    .eq('approval_status', 'approved')
+    .order('date_range_end', { ascending: false, nullsFirst: false })
+    .order('approved_at', { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (error) return c.json({ error: error.message }, 500);
+  return c.json({ threads: data ?? [], total: count ?? 0, limit, offset });
+});
+
 // ─── GET /api/threads/:id — preview cleaned content ─────────
 staging.get('/threads/:id', async (c) => {
   const { orgId } = c.get('auth');
