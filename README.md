@@ -120,6 +120,14 @@ Health check is `GET /health`. Node is pinned ≥20.12 ([`.nvmrc`](.nvmrc) /
 > the request. On a long backlog this can outlast HTTP proxy timeouts — before
 > heavy use, move it to a background job (return `202` and run off-request).
 
-## Status / not yet built
+## Status
 
-Phase 2 (Microsoft Graph, PST/MBOX upload, scheduled ingestion, offboarding, KB export, the review UI for extractions, and the Layer 1–3 KB usage features) is out of scope here — see PLANNING.md.
+Built: Milestone 1 (ingestion + staging), Milestone 2 (AI extraction pipeline),
+and the Milestone 3 review queue — humans qualify AI-drafted extractions
+(`/review`: edit, then approve/reject) before they become KB articles. A
+"Process Approved Threads" button on `/staging` triggers the pipeline.
+
+Not yet built: KB output/publishing (M4), the Layer 1–3 KB usage features
+(semantic search, ticket-reply agent, SME grading → verified pairs / M5), and all
+of Phase 2 (Microsoft Graph, PST/MBOX upload, scheduled ingestion, offboarding,
+KB export). See PLANNING.md.

@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   listStaged,
   getThread,
   approveBatch,
   excludeThread,
+  runPipeline,
   type StagedThread,
   type ThreadDetail,
   type StagedFilters,
+  type PipelineStats,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 
@@ -23,6 +26,8 @@ export function Staging() {
   const [error, setError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ThreadDetail | null>(null);
   const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [runResult, setRunResult] = useState<PipelineStats | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -84,6 +89,20 @@ export function Staging() {
     }
   }
 
+  async function onRunPipeline() {
+    setRunning(true);
+    setError(null);
+    setRunResult(null);
+    try {
+      const res = await runPipeline();
+      setRunResult(res.stats);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Pipeline run failed');
+    } finally {
+      setRunning(false);
+    }
+  }
+
   async function openPreview(id: string) {
     setPreview(null);
     try {
@@ -98,18 +117,42 @@ export function Staging() {
     <div className="mx-auto max-w-6xl p-6">
       <header className="mb-6 flex items-start justify-between">
         <div>
+          <nav className="mb-2 flex gap-4 text-sm">
+            <span className="font-medium text-gray-900">Staging</span>
+            <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
+          </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Staging Review</h1>
           <p className="text-sm text-gray-500">
             {total} staged thread{total === 1 ? '' : 's'} — nothing is AI-processed until you approve it.
           </p>
         </div>
-        <button
-          onClick={() => void supabase.auth.signOut()}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={onRunPipeline}
+            disabled={running}
+            className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            title="Runs the AI extraction pipeline on all approved threads"
+          >
+            {running ? 'Processing…' : 'Process Approved Threads'}
+          </button>
+          <button
+            onClick={() => void supabase.auth.signOut()}
+            className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
+
+      {runResult && (
+        <div className="mb-4 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
+          Pipeline run: {runResult.extracted} extracted, {runResult.skippedLowRelevance} low-relevance,{' '}
+          {runResult.skippedDuplicate} duplicate, {runResult.errored} errored (of {runResult.considered} approved).{' '}
+          {runResult.extracted > 0 && (
+            <Link to="/review" className="font-medium underline">Review drafts →</Link>
+          )}
+        </div>
+      )}
 
       <Filters filters={filters} onChange={setFilters} onRefresh={load} />
 

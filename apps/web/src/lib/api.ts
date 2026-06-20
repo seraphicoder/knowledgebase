@@ -78,3 +78,75 @@ export function approveBatch(threadIds: string[]): Promise<{ approved: number }>
 export function excludeThread(id: string): Promise<{ excluded: string }> {
   return request(`/api/threads/${id}/exclude`, { method: 'POST' });
 }
+
+// ─── Pipeline ───────────────────────────────────────────────
+
+export interface PipelineStats {
+  considered: number;
+  embedded: number;
+  skippedLowRelevance: number;
+  skippedDuplicate: number;
+  extracted: number;
+  errored: number;
+}
+
+export function runPipeline(): Promise<{ ok: boolean; stats: PipelineStats }> {
+  return request('/api/pipeline/run', { method: 'POST' });
+}
+
+// ─── Review queue (extractions) ─────────────────────────────
+
+export interface Extraction {
+  id: string;
+  thread_id: string | null;
+  title: string | null;
+  question: string | null;
+  answer: string | null;
+  category: string | null;
+  tags: string[];
+  confidence: number | null;
+  caveats: string | null;
+  status: string;
+  created_at: string;
+  metadata: Record<string, unknown> | null;
+}
+
+export interface ExtractionSourceThread {
+  id: string;
+  subject: string | null;
+  participants: string[];
+  raw_content: string | null;
+}
+
+export interface ExtractionEdit {
+  title?: string;
+  question?: string;
+  answer?: string;
+  category?: string | null;
+  tags?: string[];
+  caveats?: string | null;
+}
+
+export function listExtractions(
+  status = 'pending_review',
+): Promise<{ extractions: Extraction[]; total: number }> {
+  return request(`/api/extractions?status=${encodeURIComponent(status)}`);
+}
+
+export function getExtraction(
+  id: string,
+): Promise<{ extraction: Extraction; thread: ExtractionSourceThread | null }> {
+  return request(`/api/extractions/${id}`);
+}
+
+export function editExtraction(id: string, patch: ExtractionEdit): Promise<{ ok: boolean }> {
+  return request(`/api/extractions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export function approveExtraction(id: string): Promise<{ ok: boolean; status: string }> {
+  return request(`/api/extractions/${id}/approve`, { method: 'POST' });
+}
+
+export function rejectExtraction(id: string): Promise<{ ok: boolean; status: string }> {
+  return request(`/api/extractions/${id}/reject`, { method: 'POST' });
+}

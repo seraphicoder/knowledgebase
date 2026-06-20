@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import { Staging } from './pages/Staging';
+import { Review } from './pages/Review';
 import { Login } from './pages/Login';
 import { useSession } from './lib/useSession';
 
@@ -40,6 +41,14 @@ createRoot(rootEl).render(
           element={
             <RequireAuth>
               <Staging />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/review"
+          element={
+            <RequireAuth>
+              <Review />
             </RequireAuth>
           }
         />
