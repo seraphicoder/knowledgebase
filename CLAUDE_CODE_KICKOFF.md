@@ -140,7 +140,7 @@ Concretely:
 
 Connectors pull the **most recent conversations first and walk backwards in time**, so current, relevant threads land in staging immediately instead of after grinding through years of archives. Each connector returns a page plus an **opaque resume cursor** (`FetchPage.nextCursor`); the cursor is persisted per source (`ingestion_sources.sync_cursor`) so a large history can be ingested in batches via the `limit` option, and `backfill_complete` flips true when no older history remains.
 
-- Cursors are connector-defined and opaque to callers — Zendesk uses the list endpoint's `after_cursor` (cursor pagination, `sort=-created_at`); IMAP uses the lowest UID ingested so far.
+- Cursors are connector-defined and opaque to callers — Zendesk uses the list endpoint's `after_cursor` (cursor pagination, `sort_by=created_at&sort_order=desc`); IMAP uses the lowest UID ingested so far.
 - Batch boundaries are idempotent: overlap is absorbed by dedup on `(org_id, source_id, external_thread_id)`, so cursors need not be exact.
 - The Zendesk **incremental-export** endpoint (`/api/v2/incremental/tickets.json`) is forward-only and is **not** used for this newest-first backfill. It remains available for a *future* ongoing forward-sync mode (catching new/updated tickets after backfill) — a separate, additive concern.
 - The staging list orders by conversation recency (`date_range_end desc`) so newest threads appear at the top regardless of which batch ingested them.
@@ -389,7 +389,7 @@ Build these modules in `apps/api/src/pipeline/`:
 #### `connectors/zendesk-connector.ts`
 - Implements `Connector` for Zendesk using the REST API v2
 - Auth: HTTP Basic with `{email}/token:{api_token}` — read the email and token from `ingestion_sources.config`
-- Fetch tickets **newest-first** via `GET /api/v2/tickets.json` using **cursor pagination** (`page[size]`, `page[after]`) sorted `sort=-created_at`, walking backwards in time. Size each page to the remaining `limit` so the returned `after_cursor` aligns exactly to the tickets consumed (no skipped partial pages). Return `nextCursor = after_cursor` while `meta.has_more`, else `null`. **Validate the `sort=-created_at` param against the live account** — some list endpoints expect `sort_by`/`sort_order`. (The forward-only `/api/v2/incremental/tickets.json` endpoint is intentionally NOT used here; reserve it for a future ongoing forward-sync mode.)
+- Fetch tickets **newest-first** via `GET /api/v2/tickets.json` using **cursor pagination** (`page[size]`, `page[after]`) with `sort_by=created_at&sort_order=desc`, walking backwards in time. Size each page to the remaining `limit` so the returned `after_cursor` aligns exactly to the tickets consumed (no skipped partial pages). Return `nextCursor = after_cursor` while `meta.has_more`, else `null`. (Verified against a live account: the Tickets endpoint rejects the `sort=-created_at` shorthand with a 400. The forward-only `/api/v2/incremental/tickets.json` endpoint is intentionally NOT used here; reserve it for a future ongoing forward-sync mode.)
 - For each ticket, fetch its full comment thread via `GET /api/v2/tickets/{id}/comments.json`
 - Normalize each ticket into a `RawConversation`:
   - `externalId` = ticket ID

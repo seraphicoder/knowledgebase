@@ -67,7 +67,7 @@ Connectors are ranked by trust/friction tier, not strictly by phase — a custom
 
 #### Zendesk Connector
 - Customer generates a Zendesk **API token** (Admin Center → Apps and Integrations → APIs → Zendesk API → add token) — this is a copy-paste credential, not an OAuth admin-consent flow
-- MailMind pulls tickets via the Zendesk REST API (`/api/v2/tickets.json` + `/api/v2/tickets/{id}/comments.json`) using **cursor pagination sorted newest-first** (`sort=-created_at`), walking backwards in time so the most recent tickets are ingested first. A per-source resume cursor lets large histories be pulled in batches (see [Ingestion Direction & Resumable Backfill](#ingestion-direction--resumable-backfill))
+- MailMind pulls tickets via the Zendesk REST API (`/api/v2/tickets.json` + `/api/v2/tickets/{id}/comments.json`) using **cursor pagination sorted newest-first** (`sort_by=created_at&sort_order=desc`), walking backwards in time so the most recent tickets are ingested first. A per-source resume cursor lets large histories be pulled in batches (see [Ingestion Direction & Resumable Backfill](#ingestion-direction--resumable-backfill))
 - Each ticket's comment thread maps directly to a `RawConversation` — Zendesk already has clean thread structure, requester/agent roles, and timestamps, so noise filtering is much lighter than raw email
 - Ticket status, tags, and custom fields come through as metadata — useful later for filtering ("only ingest tickets tagged `resolved`")
 - **Why this fits Tier 1:** A scoped API token is a far smaller trust ask than mailbox access. The customer can revoke it instantly, and read-only ticket-comment scope is easy to reason about. This is genuinely *less* invasive than Mail.Read, not more.
@@ -116,12 +116,12 @@ interface Connector {
 }
 ```
 
-- **The cursor is opaque and connector-defined.** Zendesk uses the list endpoint's `after_cursor` (cursor pagination, `sort=-created_at`); IMAP uses the lowest UID ingested so far. Callers never interpret it.
+- **The cursor is opaque and connector-defined.** Zendesk uses the list endpoint's `after_cursor` (cursor pagination, `sort_by=created_at&sort_order=desc`); IMAP uses the lowest UID ingested so far. Callers never interpret it.
 - **Resumable batches.** A per-source cursor is persisted (`ingestion_sources.sync_cursor`). With a `limit`, each run pulls the next batch further back in time; `backfill_complete` flips true when a connector reports no older history. This lets a large account be ingested and verified `N` records at a time.
 - **Idempotent boundaries.** Overlap between batches is absorbed by dedup on `(org_id, source_id, external_thread_id)`, so cursors never need to be exact.
 - **Why not the Zendesk incremental-export endpoint?** That endpoint (`/api/v2/incremental/tickets.json?start_time=…`) is forward-only (oldest→newest) and cannot serve newest-first ingestion. It remains the right tool for a *future ongoing forward-sync mode* (catching new/updated tickets after the initial backfill), which is a separate, additive concern.
 
-> **Live-validation note:** the descending sort param (`sort=-created_at`) should be confirmed against the target Zendesk account — some list endpoints expect `sort_by`/`sort_order` instead.
+> **Verified:** the Tickets endpoint requires `sort_by=created_at&sort_order=desc` for newest-first ordering; it rejects the `sort=-created_at` shorthand with a 400.
 
 ---
 

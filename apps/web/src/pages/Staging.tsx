@@ -8,6 +8,7 @@ import {
   type ThreadDetail,
   type StagedFilters,
 } from '../lib/api';
+import { supabase } from '../lib/supabase';
 
 // Milestone 1 Staging Review page. Approving a thread here is the only way its
 // approval_status changes. With no pipeline runner yet, an approved thread just
@@ -95,11 +96,19 @@ export function Staging() {
 
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold text-gray-900">Staging Review</h1>
-        <p className="text-sm text-gray-500">
-          {total} staged thread{total === 1 ? '' : 's'} — nothing is AI-processed until you approve it.
-        </p>
+      <header className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Staging Review</h1>
+          <p className="text-sm text-gray-500">
+            {total} staged thread{total === 1 ? '' : 's'} — nothing is AI-processed until you approve it.
+          </p>
+        </div>
+        <button
+          onClick={() => void supabase.auth.signOut()}
+          className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+        >
+          Sign out
+        </button>
       </header>
 
       <Filters filters={filters} onChange={setFilters} onRefresh={load} />

@@ -70,9 +70,8 @@ runs; `backfill_complete` flips true when there's no older history left. Boundar
 overlap between batches is absorbed by dedup on `(org_id, source_id, external_thread_id)`.
 
 > Zendesk pulls newest-first via cursor pagination on the tickets list endpoint
-> sorted `-created_at`. Validate that sort param against your account — some
-> Zendesk list endpoints expect `sort_by`/`sort_order` (see the note in
-> [zendesk-connector.ts](apps/api/src/pipeline/connectors/zendesk-connector.ts)).
+> with `sort_by=created_at&sort_order=desc` (the Tickets endpoint rejects the
+> `sort=-created_at` shorthand with a 400 — verified against a live account).
 
 ## Architecture guarantees (SOC 2 oriented)
 

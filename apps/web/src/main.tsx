@@ -1,8 +1,30 @@
-import { StrictMode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import { Staging } from './pages/Staging';
+import { Login } from './pages/Login';
+import { useSession } from './lib/useSession';
+
+// Redirects to /login when there is no session; renders children once signed in.
+function RequireAuth({ children }: { children: ReactNode }) {
+  const { session, loading } = useSession();
+  if (loading) {
+    return <div className="p-6 text-sm text-gray-400">Loading…</div>;
+  }
+  if (!session) {
+    return <Navigate to="/login" replace />;
+  }
+  return <>{children}</>;
+}
+
+// Sends already-signed-in users away from the login page.
+function LoginRoute() {
+  const { session, loading } = useSession();
+  if (loading) return <div className="p-6 text-sm text-gray-400">Loading…</div>;
+  if (session) return <Navigate to="/staging" replace />;
+  return <Login />;
+}
 
 const rootEl = document.getElementById('root');
 if (!rootEl) throw new Error('Root element #root not found');
@@ -12,7 +34,15 @@ createRoot(rootEl).render(
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Navigate to="/staging" replace />} />
-        <Route path="/staging" element={<Staging />} />
+        <Route path="/login" element={<LoginRoute />} />
+        <Route
+          path="/staging"
+          element={
+            <RequireAuth>
+              <Staging />
+            </RequireAuth>
+          }
+        />
       </Routes>
     </BrowserRouter>
   </StrictMode>,

@@ -12,7 +12,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspace apps/api",
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "ingest": "npm run ingest --workspace apps/api"
+    "ingest": "npm run ingest --workspace apps/api --",
+    "set-creds": "npm run set-creds --workspace apps/api --"
   },
   "engines": {
     "node": ">=20.12"
