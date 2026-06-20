@@ -1,0 +1,12 @@
+{
+  // Production build for the server only. Emits dist/index.js (rootDir = src),
+  // and excludes tests/scripts so the runtime image needs no devDependencies
+  // (vitest, tsx). Use tsconfig.json for typecheck/test, which cover everything.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist"
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "tests", "scripts"]
+}

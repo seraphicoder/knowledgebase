@@ -31,8 +31,15 @@ MailMind ingests from multiple source types through a unified **connector framew
 ```typescript
 interface Connector {
   type: string;                          // 'imap' | 'zendesk' | 'graph_api' | ...
-  fetchNewConversations(since?: Date): Promise<RawConversation[]>;
+  // Pulls a page of conversations newest-first, walking backwards in time.
+  // `cursor` is the opaque token from the previous call (null = start at newest).
+  fetchConversations(cursor: string | null, options?: { limit?: number }): Promise<FetchPage>;
   testConnection(): Promise<boolean>;
+}
+
+interface FetchPage {
+  conversations: RawConversation[];      // newest-first
+  nextCursor: string | null;             // opaque resume token; null = no older history left
 }
 
 interface RawConversation {
@@ -60,7 +67,7 @@ Connectors are ranked by trust/friction tier, not strictly by phase — a custom
 
 #### Zendesk Connector
 - Customer generates a Zendesk **API token** (Admin Center → Apps and Integrations → APIs → Zendesk API → add token) — this is a copy-paste credential, not an OAuth admin-consent flow
-- MailMind pulls tickets via the Zendesk REST API (`/api/v2/tickets.json` + `/api/v2/tickets/{id}/comments.json`) on a polling schedule
+- MailMind pulls tickets via the Zendesk REST API (`/api/v2/tickets.json` + `/api/v2/tickets/{id}/comments.json`) using **cursor pagination sorted newest-first** (`sort=-created_at`), walking backwards in time so the most recent tickets are ingested first. A per-source resume cursor lets large histories be pulled in batches (see [Ingestion Direction & Resumable Backfill](#ingestion-direction--resumable-backfill))
 - Each ticket's comment thread maps directly to a `RawConversation` — Zendesk already has clean thread structure, requester/agent roles, and timestamps, so noise filtering is much lighter than raw email
 - Ticket status, tags, and custom fields come through as metadata — useful later for filtering ("only ingest tickets tagged `resolved`")
 - **Why this fits Tier 1:** A scoped API token is a far smaller trust ask than mailbox access. The customer can revoke it instantly, and read-only ticket-comment scope is easy to reason about. This is genuinely *less* invasive than Mail.Read, not more.
@@ -87,6 +94,34 @@ Connectors are ranked by trust/friction tier, not strictly by phase — a custom
 3. **Microsoft Graph API** — unlocks offboarding, needs SOC 2 trust first
 4. **PST/MBOX/EML upload** — supports offboarding without needing live API access
 5. **Future connectors** (Intercom, Freshdesk, HelpScout, Gmail) — added opportunistically based on customer demand, same framework
+
+---
+
+### Ingestion Direction & Resumable Backfill
+
+Ingestion pulls **newest-first and walks backwards in time**, not oldest-first. Rationale: support mailboxes and ticket systems can hold years of history, and the most recent threads are the most relevant to verify and act on. Pulling newest-first means useful, current knowledge appears at the top of staging immediately, rather than after grinding through old archives.
+
+Every connector implements a uniform cursor contract:
+
+```typescript
+interface FetchPage {
+  conversations: RawConversation[];   // newest-first
+  nextCursor: string | null;          // opaque resume token; null = no older history left
+}
+
+interface Connector {
+  // cursor = token from the previous call (null to start from the newest record)
+  fetchConversations(cursor: string | null, options?: { limit?: number }): Promise<FetchPage>;
+  testConnection(): Promise<boolean>;
+}
+```
+
+- **The cursor is opaque and connector-defined.** Zendesk uses the list endpoint's `after_cursor` (cursor pagination, `sort=-created_at`); IMAP uses the lowest UID ingested so far. Callers never interpret it.
+- **Resumable batches.** A per-source cursor is persisted (`ingestion_sources.sync_cursor`). With a `limit`, each run pulls the next batch further back in time; `backfill_complete` flips true when a connector reports no older history. This lets a large account be ingested and verified `N` records at a time.
+- **Idempotent boundaries.** Overlap between batches is absorbed by dedup on `(org_id, source_id, external_thread_id)`, so cursors never need to be exact.
+- **Why not the Zendesk incremental-export endpoint?** That endpoint (`/api/v2/incremental/tickets.json?start_time=…`) is forward-only (oldest→newest) and cannot serve newest-first ingestion. It remains the right tool for a *future ongoing forward-sync mode* (catching new/updated tickets after the initial backfill), which is a separate, additive concern.
+
+> **Live-validation note:** the descending sort param (`sort=-created_at`) should be confirmed against the target Zendesk account — some list endpoints expect `sort_by`/`sort_order` instead.
 
 ---
 
@@ -217,8 +252,10 @@ Each processed thread is sent to Claude with a structured prompt that extracts:
 | org_id | uuid | FK → organizations |
 | type | enum | `imap`, `zendesk`, `graph_api`, `pst_upload`, `mbox_upload`, `eml_upload` |
 | label | text | e.g. "Support Intake Mailbox" |
-| config | jsonb | encrypted credentials, endpoint, folder path |
-| last_synced_at | timestamp | |
+| config | jsonb | non-secret fields (subdomain, host, port) in plaintext; secrets AES-256-GCM encrypted under `config.credentials` |
+| last_synced_at | timestamp | timestamp of the last ingestion run |
+| sync_cursor | text | opaque, connector-defined resume token for the newest-first backfill (null = start from newest) |
+| backfill_complete | boolean | true once the connector reports no older history left to pull |
 | status | enum | `active`, `paused`, `error` |
 
 ### `email_threads`
@@ -681,4 +718,4 @@ Before pitching direct mailbox access to any customer:
 
 ---
 
-*Document version: 0.6 — Added staging/approval gate between ingestion and AI processing*
+*Document version: 0.7 — Ingestion pulls newest-first with a resumable backwards backfill (cursor-based); replaces the forward incremental-export approach for initial ingestion*

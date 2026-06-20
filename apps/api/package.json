@@ -1,0 +1,35 @@
+{
+  "name": "@mailmind/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.build.json",
+    "postbuild": "node -e \"const fs=require('fs');if(fs.existsSync('../web/dist'))fs.cpSync('../web/dist','public',{recursive:true})\"",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "ingest": "tsx scripts/test-ingest.ts",
+    "set-creds": "tsx scripts/set-source-credentials.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.71.0",
+    "@hono/node-server": "^1.13.7",
+    "@supabase/supabase-js": "^2.47.10",
+    "hono": "^4.6.14",
+    "imapflow": "^1.0.171",
+    "mailparser": "^3.7.1",
+    "openai": "^4.77.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/mailparser": "^3.4.5",
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

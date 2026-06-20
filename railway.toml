@@ -1,0 +1,17 @@
+# Railway service config for MailMind (single service: Hono API + the built SPA,
+# served same-origin). Builds from the monorepo root, so no service "Root
+# Directory" change is needed in the dashboard.
+
+[build]
+builder = "nixpacks"
+# npm ci (run by Nixpacks) installs devDeps too, so tsc/vite are available.
+# Build the web app first; the api's postbuild step copies apps/web/dist into the
+# server's ./public dir, which Hono serves.
+buildCommand = "npm run build --workspace apps/web && npm run build --workspace apps/api"
+
+[deploy]
+startCommand = "npm run start --workspace apps/api"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3

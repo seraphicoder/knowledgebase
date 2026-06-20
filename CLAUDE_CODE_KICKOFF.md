@@ -99,11 +99,20 @@ The authenticated user's `org_id` must be verified on every request. A user from
 ### 6. All ingestion goes through the Connector interface
 Every source — IMAP, Zendesk, future connectors — implements the same `Connector` interface and normalizes its data into a `RawConversation` before handing off to the thread reconstructor. Never write source-specific logic anywhere downstream of ingestion (noise filter, embedder, extractor must be source-agnostic).
 
+Ingestion pulls **newest-first, walking backwards in time**, using an opaque per-connector resume cursor so large histories can be ingested in batches (see Architecture Rule #8).
+
 ```typescript
 interface Connector {
   type: string;                          // 'imap' | 'zendesk'
-  fetchNewConversations(since?: Date): Promise<RawConversation[]>;
+  // Pulls a page of conversations newest-first. `cursor` is the opaque token
+  // from the previous call (null to start from the newest record).
+  fetchConversations(cursor: string | null, options?: { limit?: number }): Promise<FetchPage>;
   testConnection(): Promise<boolean>;
+}
+
+interface FetchPage {
+  conversations: RawConversation[];      // newest-first
+  nextCursor: string | null;             // opaque resume token; null = no older history left
 }
 
 interface RawConversation {
@@ -126,6 +135,15 @@ Concretely:
 - `thread-store.ts` (Milestone 1) inserts rows with `approval_status = 'staged'` and `processing_status = 'not_started'`. It does nothing else.
 - The embedder, relevance scorer, dedup checker, and extractor (Milestone 2) are never called from the ingestion path. They are only ever invoked by the pipeline runner, and the pipeline runner's very first query must filter `where approval_status = 'approved'`.
 - Build a staging UI in Milestone 1 (see below) so the person using the app can see what's been pulled in before deciding whether to process it.
+
+### 8. Ingestion pulls newest-first with a resumable backwards backfill
+
+Connectors pull the **most recent conversations first and walk backwards in time**, so current, relevant threads land in staging immediately instead of after grinding through years of archives. Each connector returns a page plus an **opaque resume cursor** (`FetchPage.nextCursor`); the cursor is persisted per source (`ingestion_sources.sync_cursor`) so a large history can be ingested in batches via the `limit` option, and `backfill_complete` flips true when no older history remains.
+
+- Cursors are connector-defined and opaque to callers — Zendesk uses the list endpoint's `after_cursor` (cursor pagination, `sort=-created_at`); IMAP uses the lowest UID ingested so far.
+- Batch boundaries are idempotent: overlap is absorbed by dedup on `(org_id, source_id, external_thread_id)`, so cursors need not be exact.
+- The Zendesk **incremental-export** endpoint (`/api/v2/incremental/tickets.json`) is forward-only and is **not** used for this newest-first backfill. It remains available for a *future* ongoing forward-sync mode (catching new/updated tickets after backfill) — a separate, additive concern.
+- The staging list orders by conversation recency (`date_range_end desc`) so newest threads appear at the top regardless of which batch ingested them.
 
 ---
 
@@ -170,8 +188,10 @@ create table ingestion_sources (
   type           text not null
                    check (type in ('imap', 'zendesk', 'graph_api', 'pst_upload', 'mbox_upload', 'eml_upload')),
   label          text not null,
-  config         jsonb not null default '{}',  -- encrypted credentials stored here
+  config         jsonb not null default '{}',  -- secrets AES-256-GCM encrypted under config.credentials
   last_synced_at timestamptz,
+  sync_cursor    text,                          -- opaque newest-first backfill resume token (see Rule #8)
+  backfill_complete boolean not null default false,
   status         text not null default 'active'
                    check (status in ('active', 'paused', 'error')),
   created_at     timestamptz not null default now()
@@ -321,10 +341,25 @@ create index on verified_pairs using hnsw (embedding vector_cosine_ops);
 
 -- Standard indexes
 create index on email_threads (org_id, processing_status);
+create index on email_threads (org_id, approval_status);   -- staging list + pipeline gate
 create index on extractions   (org_id, status);
 create index on kb_articles   (org_id, published_at);
 create index on audit_log     (org_id, created_at);
 ```
+
+### Migration 005 — Vector match RPCs
+
+`SECURITY INVOKER` functions for pgvector cosine similarity, scoped by `org_id`:
+- `match_extractions(p_org_id, p_query_embedding, p_match_count)` — powers dedup / merge suggestions (Milestone 2 `dedup-checker.ts`)
+- `match_kb_articles(p_org_id, p_query_embedding, p_match_count)` — powers KB semantic search / RAG (later layers)
+
+### Migration 006 — Resumable backfill cursor
+
+Adds `ingestion_sources.sync_cursor` (text) and `ingestion_sources.backfill_complete` (boolean) to support the newest-first backwards backfill (Architecture Rule #8). *(Shown inline in the `ingestion_sources` create table above for readability; in the repo these land as an additive migration.)*
+
+### RLS helper functions (note)
+
+The org-isolation policies reference `SECURITY DEFINER` helper functions (`current_user_org()`, `current_user_role()`) so a policy on `users` can read `users` without infinite recursion. Use per-operation clauses — `with check` for INSERT/UPDATE, `using` for SELECT/DELETE — not a single `for all ... using` policy.
 
 ---
 
@@ -345,7 +380,7 @@ Build these modules in `apps/api/src/pipeline/`:
 
 #### `connectors/imap-connector.ts`
 - Implements `Connector` for IMAP mailboxes using `imapflow`
-- Connect to the mailbox, fetch new messages since the last sync timestamp
+- Connect to the mailbox and fetch messages **newest-first by UID**, walking backwards from the resume cursor (the lowest UID ingested so far); honor the `limit` option and return the next cursor
 - Fetch full message bodies including HTML and plain text, plus `Message-ID` / `In-Reply-To` headers
 - Normalize each email or email thread into a `RawConversation`
 - Handle connection errors with exponential backoff retry
@@ -354,7 +389,7 @@ Build these modules in `apps/api/src/pipeline/`:
 #### `connectors/zendesk-connector.ts`
 - Implements `Connector` for Zendesk using the REST API v2
 - Auth: HTTP Basic with `{email}/token:{api_token}` — read the email and token from `ingestion_sources.config`
-- Fetch tickets via `GET /api/v2/tickets.json` (supports `start_time` cursor-based incremental export via `/api/v2/incremental/tickets.json?start_time={unix_timestamp}` — prefer this endpoint for polling since it's purpose-built for incremental sync)
+- Fetch tickets **newest-first** via `GET /api/v2/tickets.json` using **cursor pagination** (`page[size]`, `page[after]`) sorted `sort=-created_at`, walking backwards in time. Size each page to the remaining `limit` so the returned `after_cursor` aligns exactly to the tickets consumed (no skipped partial pages). Return `nextCursor = after_cursor` while `meta.has_more`, else `null`. **Validate the `sort=-created_at` param against the live account** — some list endpoints expect `sort_by`/`sort_order`. (The forward-only `/api/v2/incremental/tickets.json` endpoint is intentionally NOT used here; reserve it for a future ongoing forward-sync mode.)
 - For each ticket, fetch its full comment thread via `GET /api/v2/tickets/{id}/comments.json`
 - Normalize each ticket into a `RawConversation`:
   - `externalId` = ticket ID
@@ -363,7 +398,7 @@ Build these modules in `apps/api/src/pipeline/`:
   - `messages` = each comment mapped to `{ author, body (use `plain_body`, not `html_body`), timestamp }`
   - `metadata` = `{ status, tags, priority, ticket_type }` — store these, they're useful for future filtering (e.g. only ingest `status: solved` tickets)
 - Respect Zendesk rate limits (700 requests/min on most plans) — implement a simple token bucket or just a delay between paginated requests
-- Paginate using the `next_page` cursor in the incremental export response until `end_of_stream: true`
+- Comment threads themselves paginate with the legacy `next_page` URL — follow it until null
 - `testConnection()` calls `GET /api/v2/users/me.json` to verify the token works
 
 #### `thread-reconstructor.ts`
@@ -387,7 +422,7 @@ Build these modules in `apps/api/src/pipeline/`:
 - Handle batch inserts efficiently
 
 #### `routes/staging.ts` (API routes, not pipeline)
-- `GET /api/threads/staged` — list staged threads for the org, filterable by source, date range, search term. Returns subject, source, participants, date, message count — NOT an AI summary, since none exists yet at this point
+- `GET /api/threads/staged` — list staged threads for the org, filterable by source, date range, search term, ordered newest-first by conversation recency (`date_range_end desc`). Returns subject, source, participants, date, message count — NOT an AI summary, since none exists yet at this point
 - `POST /api/threads/:id/approve` — set `approval_status = 'approved'`, `approved_by`, `approved_at`. Write audit log entry (`thread.approved`). This is the only code path allowed to flip a thread to `approved`.
 - `POST /api/threads/approve-batch` — accepts a list of thread IDs, or a filter (source_id + date range), approves all matching staged threads in one transaction. Same audit logging per thread.
 - `POST /api/threads/:id/exclude` — set `approval_status = 'excluded'`. Excluded threads are never processed and can optionally be purged per the data retention policy.
@@ -401,7 +436,7 @@ Build these modules in `apps/api/src/pipeline/`:
 
 **Milestone 1 is complete when:**
 1. A test IMAP mailbox with 20+ forwarded support threads can be fully ingested, cleaned, and stored in Supabase as `staged` — with correct deduplication
-2. A real Zendesk account's tickets can be fully ingested via the incremental export endpoint, cleaned, and stored in Supabase as `staged` — with correct deduplication
+2. A real Zendesk account's tickets can be ingested newest-first via cursor pagination, cleaned, and stored in Supabase as `staged` — with correct deduplication; a limited run pulls the newest batch and re-running walks further back via the persisted `sync_cursor`
 3. Both connectors produce `Thread` objects that flow through the exact same `noise-filter.ts` and `thread-store.ts` code paths — no source-specific branching downstream of `thread-reconstructor.ts`
 4. The Staging Review Page shows pulled threads from both connectors, and approving a thread is the only way its `approval_status` changes
 5. **Verify no AI API call of any kind (Anthropic or OpenAI) fires anywhere in the Milestone 1 code path.** Ingestion must work completely with both API keys absent from `.env` — if it doesn't, something in Milestone 1 has an undeclared AI dependency and that's a bug.
@@ -549,14 +584,15 @@ Do not build any of the following in Phase 1 — they are Phase 2:
 1. Read `PLANNING.md` in full before writing any code
 2. Scaffold the monorepo structure
 3. Create `.env.example` and `.gitignore`
-4. Write and run all 4 Supabase migrations
+4. Write and run all 6 Supabase migrations (001 extensions, 002 tables, 003 RLS, 004 indexes, 005 vector-match RPCs, 006 sync cursor)
 5. Verify RLS policies are active on all tables
-6. Build the `Connector` interface and `RawConversation` type first
+6. Build the `Connector` interface, `RawConversation`, and `FetchPage` types first
 7. Build the Zendesk connector — it's the faster path to real test data since there's an existing Zendesk account available
 8. Build the IMAP connector
 9. Build the shared thread-reconstructor / noise-filter / thread-store pipeline
-10. Write `scripts/test-ingest.ts` that can run the full Milestone 1 pipeline against either connector (pass `--source=zendesk` or `--source=imap`)
-11. Only after Milestone 1 is verified end-to-end on both connectors: begin Milestone 2
+10. Build a credential helper (`scripts/set-source-credentials.ts`) that encrypts source secrets from `.env` into `ingestion_sources.config` and verifies the connection
+11. Write `scripts/test-ingest.ts` that can run the full Milestone 1 pipeline against either connector (`--source=zendesk` or `--source=imap`), with a `--limit=N` flag to pull one newest-first batch at a time for verification
+12. Only after Milestone 1 is verified end-to-end on both connectors: begin Milestone 2
 
 ---
 
@@ -571,4 +607,4 @@ If anything is ambiguous, ask before writing code. Specifically confirm:
 
 ---
 
-*Kickoff prompt version: 1.2 — Phase 1, Milestones 1 & 2, added connector framework + Zendesk connector + mandatory staging/approval gate*
+*Kickoff prompt version: 1.3 — Ingestion pulls newest-first with a resumable backwards backfill (cursor-based connector contract, `sync_cursor`/`backfill_complete`); replaces the forward incremental-export approach. Adds credential helper + `--limit` batching.*

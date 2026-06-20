@@ -1,0 +1,221 @@
+import type { Connector, FetchOptions, FetchPage, RawConversation, RawMessage, ZendeskConfig } from '../connector.js';
+import { withRetry, isRetryableHttpStatus } from '../../lib/retry.js';
+import { log } from '../../lib/logger.js';
+
+// Zendesk connector (REST API v2). Uses the incremental export endpoint for
+// polling, then fetches each ticket's comment thread. One ticket -> one
+// RawConversation. Zendesk threads are already clean, so noise filtering
+// downstream is light — but that decision lives in noise-filter.ts, not here.
+
+interface ZendeskTicket {
+  id: number;
+  subject: string | null;
+  status: string;
+  tags: string[];
+  priority: string | null;
+  type: string | null;
+  requester_id: number | null;
+  assignee_id: number | null;
+}
+
+interface ZendeskComment {
+  id: number;
+  author_id: number;
+  plain_body: string;
+  html_body: string;
+  created_at: string;
+}
+
+interface TicketsCursorResponse {
+  tickets: ZendeskTicket[];
+  meta: { has_more: boolean; after_cursor: string | null; before_cursor: string | null };
+  links: { next: string | null; prev: string | null };
+}
+
+const PAGE_MAX = 100; // Zendesk cursor-pagination max page[size]
+
+const RATE_LIMIT_DELAY_MS = 120; // ~500 req/min, safely under the 700/min cap
+
+export class ZendeskConnector implements Connector {
+  readonly type = 'zendesk';
+  private readonly baseUrl: string;
+  private readonly authHeader: string;
+  private readonly userEmailCache = new Map<number, string>();
+
+  constructor(private readonly config: ZendeskConfig) {
+    this.baseUrl = `https://${config.subdomain}.zendesk.com`;
+    // HTTP Basic with "{email}/token:{api_token}".
+    const creds = `${config.email}/token:${config.apiToken}`;
+    this.authHeader = `Basic ${Buffer.from(creds).toString('base64')}`;
+  }
+
+  async testConnection(): Promise<boolean> {
+    try {
+      await this.get<{ user: { id: number } }>('/api/v2/users/me.json');
+      return true;
+    } catch (err) {
+      log.error('Zendesk testConnection failed', {
+        subdomain: this.config.subdomain,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return false;
+    }
+  }
+
+  async fetchConversations(cursor: string | null, options?: FetchOptions): Promise<FetchPage> {
+    const limit = options?.limit;
+    const { tickets, nextCursor } = await this.fetchTicketPages(cursor, limit);
+
+    // Tickets already arrive newest-first (sort=-created_at). Fetch comments in
+    // that same order so the resulting conversations stay newest-first.
+    const conversations: RawConversation[] = [];
+    for (const ticket of tickets) {
+      const comments = await this.fetchComments(ticket.id);
+      conversations.push(await this.toConversation(ticket, comments));
+      await sleep(RATE_LIMIT_DELAY_MS);
+    }
+    log.info('Zendesk fetch complete', {
+      tickets: conversations.length, limit: limit ?? null, nextCursor: nextCursor ?? null,
+    });
+    return { conversations, nextCursor };
+  }
+
+  // Cursor pagination on the tickets list endpoint, newest-first. We size each
+  // page to the exact remaining need so the after_cursor always aligns to the
+  // tickets we actually consumed — never skipping a partial page.
+  //
+  // NOTE: the descending sort param (`sort=-created_at`) should be validated
+  // against the live account; some Zendesk list endpoints expect
+  // `sort_by`/`sort_order` instead. Adjust here if the API rejects it.
+  private async fetchTicketPages(
+    cursor: string | null,
+    limit?: number,
+  ): Promise<{ tickets: ZendeskTicket[]; nextCursor: string | null }> {
+    const tickets: ZendeskTicket[] = [];
+    let after = cursor;
+    let hasMore = true;
+
+    while (hasMore && (limit === undefined || tickets.length < limit)) {
+      const size = limit === undefined ? PAGE_MAX : Math.min(limit - tickets.length, PAGE_MAX);
+      const page = await this.get<TicketsCursorResponse>(this.ticketsPagePath(size, after));
+      tickets.push(...page.tickets);
+      after = page.meta.after_cursor;
+      hasMore = page.meta.has_more;
+      if (hasMore && (limit === undefined || tickets.length < limit)) await sleep(RATE_LIMIT_DELAY_MS);
+    }
+
+    // nextCursor is null only when Zendesk says there is no more history.
+    return { tickets, nextCursor: hasMore ? after : null };
+  }
+
+  private ticketsPagePath(size: number, after: string | null): string {
+    const parts = [`page[size]=${size}`, 'sort=-created_at'];
+    if (after) parts.push(`page[after]=${encodeURIComponent(after)}`);
+    return `/api/v2/tickets.json?${parts.join('&')}`;
+  }
+
+  private async fetchComments(ticketId: number): Promise<ZendeskComment[]> {
+    const out: ZendeskComment[] = [];
+    let url: string | null = `/api/v2/tickets/${ticketId}/comments.json`;
+    while (url) {
+      const page: { comments: ZendeskComment[]; next_page: string | null } =
+        await this.get(url);
+      out.push(...page.comments);
+      url = pathOf(page.next_page);
+      if (url) await sleep(RATE_LIMIT_DELAY_MS);
+    }
+    return out;
+  }
+
+  private async toConversation(
+    ticket: ZendeskTicket,
+    comments: ZendeskComment[],
+  ): Promise<RawConversation> {
+    const messages: RawMessage[] = comments.map((c) => ({
+      author: `user:${c.author_id}`, // resolved lazily below for participants
+      body: c.plain_body, // plain_body, never html_body
+      timestamp: new Date(c.created_at),
+    }));
+
+    const participants: string[] = [];
+    for (const id of [ticket.requester_id, ticket.assignee_id]) {
+      if (id == null) continue;
+      const email = await this.resolveUserEmail(id);
+      if (email) participants.push(email);
+    }
+
+    return {
+      externalId: String(ticket.id),
+      subject: ticket.subject ?? '(no subject)',
+      participants,
+      messages,
+      metadata: {
+        status: ticket.status,
+        tags: ticket.tags,
+        priority: ticket.priority,
+        ticket_type: ticket.type,
+      },
+    };
+  }
+
+  private async resolveUserEmail(userId: number): Promise<string | null> {
+    const cached = this.userEmailCache.get(userId);
+    if (cached !== undefined) return cached;
+    try {
+      const res = await this.get<{ user: { email: string | null } }>(
+        `/api/v2/users/${userId}.json`,
+      );
+      const email = res.user.email ?? '';
+      this.userEmailCache.set(userId, email);
+      await sleep(RATE_LIMIT_DELAY_MS);
+      return email || null;
+    } catch {
+      return null;
+    }
+  }
+
+  private async get<T>(path: string): Promise<T> {
+    return withRetry(
+      async () => {
+        const res = await fetch(`${this.baseUrl}${path}`, {
+          headers: { Authorization: this.authHeader, Accept: 'application/json' },
+        });
+        if (res.status === 429) {
+          const retryAfter = Number(res.headers.get('retry-after') ?? '1');
+          await sleep(retryAfter * 1000);
+          throw new HttpError(res.status, `Zendesk rate limited on ${path}`);
+        }
+        if (!res.ok) {
+          throw new HttpError(res.status, `Zendesk ${res.status} on ${path}`);
+        }
+        return (await res.json()) as T;
+      },
+      {
+        label: `zendesk.get ${path}`,
+        maxAttempts: 3,
+        baseDelayMs: 1000,
+        isRetryable: (err) => err instanceof HttpError && isRetryableHttpStatus(err.status),
+      },
+    );
+  }
+}
+
+class HttpError extends Error {
+  constructor(readonly status: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Zendesk next_page is a full URL; we re-issue against baseUrl using its path. */
+function pathOf(nextPage: string | null): string | null {
+  if (!nextPage) return null;
+  try {
+    const u = new URL(nextPage);
+    return u.pathname + u.search;
+  } catch {
+    return nextPage;
+  }
+}

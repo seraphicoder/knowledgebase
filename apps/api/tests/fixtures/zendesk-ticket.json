@@ -1,0 +1,42 @@
+{
+  "incremental": {
+    "tickets": [
+      {
+        "id": 1001,
+        "subject": "Cannot log in after password reset",
+        "status": "solved",
+        "tags": ["login", "auth"],
+        "priority": "normal",
+        "type": "incident",
+        "requester_id": 501,
+        "assignee_id": 777
+      }
+    ],
+    "next_page": "https://acme.zendesk.com/api/v2/incremental/tickets.json?start_time=1700000050",
+    "end_of_stream": true,
+    "end_time": 1700000050
+  },
+  "comments": {
+    "comments": [
+      {
+        "id": 9001,
+        "author_id": 501,
+        "plain_body": "I reset my password but still can't log in. Help!",
+        "html_body": "<p>I reset my password but still can't log in. Help!</p>",
+        "created_at": "2026-01-05T10:00:00Z"
+      },
+      {
+        "id": 9002,
+        "author_id": 777,
+        "plain_body": "Please clear your browser cookies for our domain and try again. That resolves it.",
+        "html_body": "<p>Please clear your browser cookies...</p>",
+        "created_at": "2026-01-05T10:30:00Z"
+      }
+    ],
+    "next_page": null
+  },
+  "users": {
+    "501": { "user": { "id": 501, "email": "requester@customer.example" } },
+    "777": { "user": { "id": 777, "email": "agent@acme.example" } }
+  }
+}
