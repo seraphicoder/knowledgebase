@@ -14,6 +14,7 @@ import {
   type PublishImageInput,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { Lightbox } from '../components/Lightbox';
 
 // Heavy canvas editor — lazy-loaded so it stays out of the main bundle.
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
@@ -143,6 +144,7 @@ function ReviewDrawer({
   const [images, setImages] = useState<ThreadAttachment[]>([]);
   const [choices, setChoices] = useState<Record<string, ImageChoice>>({});
   const [editing, setEditing] = useState<{ id: string; source: string } | null>(null);
+  const [previewIndex, setPreviewIndex] = useState<number | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -290,13 +292,17 @@ function ReviewDrawer({
                 </h3>
                 <p className="mb-2 text-xs text-gray-400">Uncheck to leave an image off the published article, or edit to crop/annotate it.</p>
                 <div className="flex flex-wrap gap-3">
-                  {images.map((a) => {
+                  {images.map((a, idx) => {
                     const ch = choices[a.id];
                     const preview = ch?.editedDataUrl ?? a.url ?? '';
                     return (
                       <div key={a.id} className="w-28">
                         <div className={`relative rounded border ${ch?.included ? 'border-emerald-400' : 'border-gray-200 opacity-50'}`}>
-                          {preview && <img src={preview} alt={a.filename ?? ''} className="h-24 w-full rounded object-cover" />}
+                          {preview && (
+                            <button type="button" onClick={() => setPreviewIndex(idx)} className="block w-full" title="Preview">
+                              <img src={preview} alt={a.filename ?? ''} className="h-24 w-full cursor-zoom-in rounded object-cover" />
+                            </button>
+                          )}
                           {ch?.editedDataUrl && (
                             <span className="absolute left-1 top-1 rounded bg-blue-600 px-1 text-[10px] text-white">edited</span>
                           )}
@@ -353,6 +359,15 @@ function ReviewDrawer({
         )}
       </div>
     </div>
+
+      {previewIndex != null && (
+        <Lightbox
+          images={images.map((a) => ({ url: choices[a.id]?.editedDataUrl ?? a.url ?? '', filename: a.filename }))}
+          index={previewIndex}
+          onIndex={setPreviewIndex}
+          onClose={() => setPreviewIndex(null)}
+        />
+      )}
 
       {editing && (
         <Suspense
