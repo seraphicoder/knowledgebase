@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   listKb,
   getKbArticle,
   searchKb,
+  unpublishArticle,
   type KbArticleSummary,
   type KbArticleDetail,
   type KbSearchResult,
@@ -176,6 +177,22 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const [article, setArticle] = useState<KbArticleDetail | null>(null);
   const [source, setSource] = useState<{ id: string; subject: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const navigate = useNavigate();
+
+  async function onEdit() {
+    if (!article) return;
+    if (!confirm('Move this article back to draft for editing? It will leave the Knowledge Base until you re-publish it in Review.')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await unpublishArticle(article.id);
+      navigate('/review');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to move article to draft');
+      setBusy(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -216,7 +233,10 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
               {article.category && <span className="rounded bg-gray-100 px-2 py-0.5">{article.category}</span>}
               {article.tags.map((t) => <span key={t} className="rounded bg-gray-100 px-2 py-0.5">{t}</span>)}
-              <button onClick={download} className="ml-auto rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50">Download .md</button>
+              <button onClick={onEdit} disabled={busy} className="ml-auto rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40">
+                {busy ? 'Moving…' : 'Edit'}
+              </button>
+              <button onClick={download} className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50">Download .md</button>
             </div>
             <Markdown body={article.body} />
             <ArticleImages articleId={article.id} />

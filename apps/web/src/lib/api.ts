@@ -260,3 +260,7 @@ export function getKbArticle(
 export function searchKb(q: string): Promise<{ mode: 'semantic' | 'keyword'; results: KbSearchResult[] }> {
   return request('/api/kb/search', { method: 'POST', body: JSON.stringify({ q }) });
 }
+
+export function unpublishArticle(id: string): Promise<{ ok: boolean; extractionId: string }> {
+  return request(`/api/kb/${id}/unpublish`, { method: 'POST' });
+}

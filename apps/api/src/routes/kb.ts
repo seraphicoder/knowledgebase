@@ -2,8 +2,11 @@ import { Hono, type Context } from 'hono';
 import { z } from 'zod';
 import { getServiceClient } from '../lib/supabase.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
+import { writeAudit } from '../lib/audit.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
 import { log } from '../lib/logger.js';
+
+const MANAGER_ROLES = new Set(['admin', 'reviewer', 'sme']);
 
 // Knowledge base read + search. Published articles are readable by everyone in
 // the org (that's the point of the KB). Search is semantic (pgvector) with a
@@ -93,6 +96,43 @@ kb.get('/kb/:id/images', async (c: Context<{ Variables: AuthVars }>) => {
     url: urlByPath.get(r.storage_path as string) ?? null,
   }));
   return c.json({ images });
+});
+
+// ─── POST /api/kb/:id/unpublish — move article back to draft ──
+// Sends the linked extraction back to 'pending_review' and removes the live
+// article (cascades its images) so it can be re-edited in Review and re-published.
+kb.post('/kb/:id/unpublish', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!MANAGER_ROLES.has(role)) return c.json({ error: 'Only reviewers can edit articles' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+  const db = getServiceClient();
+
+  const { data: art, error } = await db
+    .from('kb_articles')
+    .select('id, extraction_id')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .single();
+  if (error || !art) return c.json({ error: 'Article not found' }, 404);
+  if (!art.extraction_id) return c.json({ error: 'This article has no source draft to edit' }, 400);
+
+  // Back to draft so it reappears in the Review queue.
+  await db
+    .from('extractions')
+    .update({ status: 'pending_review', reviewed_by: null, reviewed_at: null })
+    .eq('org_id', orgId)
+    .eq('id', art.extraction_id as string);
+
+  // Remove the live article (cascade clears kb_article_images).
+  const { error: delErr } = await db.from('kb_articles').delete().eq('org_id', orgId).eq('id', id);
+  if (delErr) return c.json({ error: delErr.message }, 500);
+
+  await writeAudit({
+    orgId, userId, action: 'article.unpublished', resource: 'extractions',
+    resourceId: art.extraction_id as string, metadata: { articleId: id },
+  });
+  return c.json({ ok: true, extractionId: art.extraction_id });
 });
 
 // ─── POST /api/kb/search — semantic search w/ keyword fallback ──
