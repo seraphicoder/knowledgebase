@@ -45,13 +45,19 @@ export class ExtractionParseError extends Error {
   }
 }
 
-export async function extractKnowledge(cleanedContent: string): Promise<ExtractionResult[]> {
+export async function extractKnowledge(
+  cleanedContent: string,
+  factsBlock = '',
+): Promise<ExtractionResult[]> {
+  // Org domain facts are appended to the system prompt as authoritative context
+  // so the model corrects its assumptions (e.g. flatbed vs roll-to-roll).
+  const system = factsBlock ? `${SYSTEM}\n\n${factsBlock}` : SYSTEM;
   const res = await withRetry(
     () =>
       getAnthropic().messages.create({
         model: MODELS.extraction,
         max_tokens: 4000, // room for several entries from a multi-issue thread
-        system: SYSTEM,
+        system,
         messages: [{ role: 'user', content: cleanedContent.slice(0, 30000) }],
       }),
     {

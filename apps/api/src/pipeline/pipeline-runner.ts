@@ -5,6 +5,7 @@ import { embedText } from './embedder.js';
 import { scoreRelevance, RELEVANCE_THRESHOLD } from './relevance-scorer.js';
 import { checkDuplicate } from './dedup-checker.js';
 import { extractKnowledge, ExtractionParseError } from './extractor.js';
+import { getApplicableFacts, buildFactsBlock } from './domain-facts.js';
 
 // THE APPROVAL GATE ENFORCEMENT POINT.
 //
@@ -87,7 +88,9 @@ export async function runPipeline(orgId: string): Promise<PipelineStats> {
         }
 
         // 4. Extract (Sonnet) — may yield several Q&A entries for a multi-issue thread.
-        const extractions = await extractKnowledge(content);
+        // Ground it with the org's applicable domain facts so it corrects assumptions.
+        const factsBlock = buildFactsBlock(await getApplicableFacts(orgId, content));
+        const extractions = await extractKnowledge(content, factsBlock);
         if (extractions.length === 0) {
           // Passed the gates but Sonnet found no reusable, resolved knowledge.
           await markSkipped(orgId, id, 'no_reusable_knowledge', {});

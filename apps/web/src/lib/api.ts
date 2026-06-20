@@ -151,3 +151,33 @@ export function approveExtraction(id: string): Promise<{ ok: boolean; status: st
 export function rejectExtraction(id: string): Promise<{ ok: boolean; status: string }> {
   return request(`/api/extractions/${id}/reject`, { method: 'POST' });
 }
+
+// ─── Domain facts (grounding rules) ─────────────────────────
+
+export interface DomainFact {
+  id: string;
+  term: string | null;
+  fact: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export function listFacts(): Promise<{ facts: DomainFact[] }> {
+  return request('/api/facts');
+}
+
+export function createFact(input: { term: string | null; fact: string }): Promise<{ fact: DomainFact }> {
+  return request('/api/facts', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateFact(
+  id: string,
+  patch: { term?: string | null; fact?: string; active?: boolean },
+): Promise<{ ok: boolean }> {
+  return request(`/api/facts/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export function deleteFact(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/facts/${id}`, { method: 'DELETE' });
+}

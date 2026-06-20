@@ -46,6 +46,7 @@ export function Review() {
           <nav className="mb-2 flex gap-4 text-sm">
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
             <span className="font-medium text-gray-900">Review</span>
+            <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Review Queue</h1>
           <p className="text-sm text-gray-500">

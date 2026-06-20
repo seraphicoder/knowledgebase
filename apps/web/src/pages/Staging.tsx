@@ -120,6 +120,7 @@ export function Staging() {
           <nav className="mb-2 flex gap-4 text-sm">
             <span className="font-medium text-gray-900">Staging</span>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
+            <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Staging Review</h1>
           <p className="text-sm text-gray-500">

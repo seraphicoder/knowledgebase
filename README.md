@@ -122,10 +122,16 @@ Health check is `GET /health`. Node is pinned ≥20.12 ([`.nvmrc`](.nvmrc) /
 
 ## Status
 
-Built: Milestone 1 (ingestion + staging), Milestone 2 (AI extraction pipeline),
+Built: Milestone 1 (ingestion + staging), Milestone 2 (AI extraction pipeline —
+multi-Q&A: one thread can yield several drafts, one per distinct resolved issue),
 and the Milestone 3 review queue — humans qualify AI-drafted extractions
 (`/review`: edit, then approve/reject) before they become KB articles. A
 "Process Approved Threads" button on `/staging` triggers the pipeline.
+
+Domain Facts (`/facts`): org-authored authoritative facts/rules injected into the
+extraction prompt so the AI uses the customer's truth instead of its assumptions
+(e.g. "Model XYZ is roll-to-roll, not flatbed"). Term-triggered facts apply when
+the term appears in a thread; termless facts are global rules.
 
 Not yet built: KB output/publishing (M4), the Layer 1–3 KB usage features
 (semantic search, ticket-reply agent, SME grading → verified pairs / M5), and all

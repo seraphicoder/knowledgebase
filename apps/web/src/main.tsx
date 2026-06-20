@@ -4,6 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import { Staging } from './pages/Staging';
 import { Review } from './pages/Review';
+import { Facts } from './pages/Facts';
 import { Login } from './pages/Login';
 import { useSession } from './lib/useSession';
 
@@ -49,6 +50,14 @@ createRoot(rootEl).render(
           element={
             <RequireAuth>
               <Review />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/facts"
+          element={
+            <RequireAuth>
+              <Facts />
             </RequireAuth>
           }
         />

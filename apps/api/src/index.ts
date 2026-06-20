@@ -7,6 +7,7 @@ import { cors } from 'hono/cors';
 import { staging } from './routes/staging.js';
 import { pipeline } from './routes/pipeline.js';
 import { review } from './routes/review.js';
+import { facts } from './routes/facts.js';
 import { env } from './lib/env.js';
 import { log } from './lib/logger.js';
 
@@ -28,6 +29,7 @@ app.get('/health', (c) => c.json({ status: 'ok', service: 'mailmind-api' }));
 app.route('/api', staging);
 app.route('/api', pipeline);
 app.route('/api', review);
+app.route('/api', facts);
 
 // Single-service deploy: serve the built SPA same-origin from this server.
 // Only mounted when a build is present (it isn't in local dev — use the Vite
