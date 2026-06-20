@@ -293,7 +293,8 @@ export interface SuggestionReview {
 
 export interface SuggestionDetailResponse {
   suggestion: SuggestionDetail;
-  ticket: { id: string; subject: string | null; raw_content: string | null } | null;
+  ticketText: string | null;
+  ticket: { id: string; subject: string | null } | null;
   citedArticles: { id: string; title: string }[];
   citedThreads: { id: string; subject: string | null }[];
   review: SuggestionReview | null;
@@ -303,6 +304,12 @@ export function suggestForThread(threadId: string): Promise<{
   suggestion: { id: string; suggestedReply: string; confidence: number };
 }> {
   return request(`/api/tickets/${threadId}/suggest`, { method: 'POST' });
+}
+
+export function suggestForText(text: string): Promise<{
+  suggestion: { id: string; suggestedReply: string; confidence: number };
+}> {
+  return request('/api/suggestions/draft', { method: 'POST', body: JSON.stringify({ text }) });
 }
 
 export function listSuggestions(status?: string): Promise<{ suggestions: SuggestionSummary[] }> {

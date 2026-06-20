@@ -152,8 +152,8 @@ via a lazy-loaded canvas editor); on Approve & Publish only the chosen/edited
 images attach to the article (`kb_article_images`, migration 009). Images only for
 now (no AI vision yet).
 
-Reply Agent (`/replies`, Milestone 5): pick a ticket → a KB-grounded **suggested
-reply** is drafted (Sonnet over retrieved KB articles + similar past threads +
+Reply Agent (`/replies`, Milestone 5): **paste a ticket that just came in** (or
+pick an existing one) → a KB-grounded **suggested reply** is drafted (Sonnet over retrieved KB articles + similar past threads +
 verified pairs) with a **composite confidence score** and cited sources. Edit /
 accept / discard / copy — it **never sends**. SME scoring (correct / partial /
 wrong + corrections) feeds **verified Q&A pairs** that get priority retrieval on

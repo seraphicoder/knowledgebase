@@ -33,7 +33,26 @@ tickets.post('/tickets/:threadId/suggest', async (c: Context<{ Variables: AuthVa
   if (error || !thread) return c.json({ error: 'Thread not found' }, 404);
 
   try {
-    const s = await generateSuggestion(orgId, { id: thread.id as string, raw_content: thread.raw_content as string | null });
+    const s = await generateSuggestion(orgId, {
+      threadId: thread.id as string,
+      content: (thread.raw_content as string | null) ?? '',
+    });
+    return c.json({ suggestion: s });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Suggestion failed' }, 500);
+  }
+});
+
+// ─── POST /api/suggestions/draft — ad-hoc pasted ticket ─────
+const draftSchema = z.object({ text: z.string().trim().min(1) });
+
+tickets.post('/suggestions/draft', async (c) => {
+  const { orgId, role } = c.get('auth');
+  if (!canAct(role)) return c.json({ error: 'Not permitted' }, 403);
+  const parsed = draftSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Paste some ticket text' }, 400);
+  try {
+    const s = await generateSuggestion(orgId, { content: parsed.data.text });
     return c.json({ suggestion: s });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Suggestion failed' }, 500);
@@ -65,14 +84,17 @@ tickets.get('/suggestions/:id', async (c: Context<{ Variables: AuthVars }>) => {
 
   const { data: s, error } = await db
     .from('ticket_suggestions')
-    .select('id, source_thread_id, suggested_reply, confidence_score, retrieved_article_ids, retrieved_thread_ids, status, final_reply, created_at')
+    .select('id, source_thread_id, ticket_text, suggested_reply, confidence_score, retrieved_article_ids, retrieved_thread_ids, status, final_reply, created_at')
     .eq('org_id', orgId)
     .eq('id', id)
     .single();
   if (error || !s) return c.json({ error: 'Suggestion not found' }, 404);
 
+  const threadId = s.source_thread_id as string | null;
   const [ticket, articles, sources] = await Promise.all([
-    db.from('email_threads').select('id, subject, raw_content').eq('org_id', orgId).eq('id', s.source_thread_id as string).single(),
+    threadId
+      ? db.from('email_threads').select('id, subject').eq('org_id', orgId).eq('id', threadId).single()
+      : Promise.resolve({ data: null }),
     db.from('kb_articles').select('id, title').eq('org_id', orgId).in('id', (s.retrieved_article_ids as string[]) ?? []),
     db.from('email_threads').select('id, subject').eq('org_id', orgId).in('id', (s.retrieved_thread_ids as string[]) ?? []),
   ]);
@@ -87,7 +109,8 @@ tickets.get('/suggestions/:id', async (c: Context<{ Variables: AuthVars }>) => {
 
   return c.json({
     suggestion: s,
-    ticket: ticket.data ?? null,
+    ticketText: (s.ticket_text as string | null) ?? null,
+    ticket: ticket.data ?? null, // source thread (id, subject) if it came from one
     citedArticles: articles.data ?? [],
     citedThreads: sources.data ?? [],
     review: review.data ?? null,
@@ -141,7 +164,7 @@ tickets.post('/suggestions/:id/review', async (c: Context<{ Variables: AuthVars 
 
   const { data: s, error } = await db
     .from('ticket_suggestions')
-    .select('id, source_thread_id, suggested_reply, final_reply')
+    .select('id, source_thread_id, ticket_text, suggested_reply, final_reply')
     .eq('org_id', orgId)
     .eq('id', id)
     .single();
@@ -168,13 +191,18 @@ tickets.post('/suggestions/:id/review', async (c: Context<{ Variables: AuthVars 
   let verifiedPairId: string | null = null;
   if (parsed.data.verdict !== 'wrong') {
     const answer = parsed.data.correctedAnswer?.trim() || (s.final_reply as string) || (s.suggested_reply as string) || '';
-    const { data: th } = await db
-      .from('email_threads')
-      .select('subject, raw_content')
-      .eq('org_id', orgId)
-      .eq('id', s.source_thread_id as string)
-      .single();
-    const question = (th?.subject as string) || ((th?.raw_content as string) ?? '').slice(0, 300);
+    // Question for the verified pair: source thread subject if any, else the
+    // pasted ticket text.
+    let question = ((s.ticket_text as string | null) ?? '').slice(0, 300);
+    if (s.source_thread_id) {
+      const { data: th } = await db
+        .from('email_threads')
+        .select('subject')
+        .eq('org_id', orgId)
+        .eq('id', s.source_thread_id as string)
+        .single();
+      if (th?.subject) question = th.subject as string;
+    }
     if (answer && question) {
       try {
         const emb = toVector(await embedText(question));

@@ -30,18 +30,19 @@ Return ONLY valid JSON, no markdown: {"reply": string, "confidence": number}  //
 
 export async function generateSuggestion(
   orgId: string,
-  thread: { id: string; raw_content: string | null },
+  input: { threadId?: string | null; content: string },
 ): Promise<SuggestionResult> {
-  const content = (thread.raw_content ?? '').trim();
+  const content = (input.content ?? '').trim();
   if (!content) throw new Error('Ticket has no content to answer');
+  const threadId = input.threadId ?? null;
 
   const db = getServiceClient();
   const vec = toVector(await embedText(content));
 
-  // Parallel retrieval.
+  // Parallel retrieval (exclude the ticket's own thread when it is one).
   const [kbRes, thRes, vpRes] = await Promise.all([
     db.rpc('match_kb_articles', { p_org_id: orgId, p_query_embedding: vec, p_match_count: 5 }),
-    db.rpc('match_email_threads', { p_org_id: orgId, p_query_embedding: vec, p_match_count: 5, p_exclude: thread.id }),
+    db.rpc('match_email_threads', { p_org_id: orgId, p_query_embedding: vec, p_match_count: 5, p_exclude: threadId }),
     db.rpc('match_verified_pairs', { p_org_id: orgId, p_query_embedding: vec, p_match_count: 3 }),
   ]);
   const articles = (kbRes.data ?? []) as KbHit[];
@@ -80,7 +81,8 @@ export async function generateSuggestion(
     .from('ticket_suggestions')
     .insert({
       org_id: orgId,
-      source_thread_id: thread.id,
+      source_thread_id: threadId,
+      ticket_text: content,
       suggested_reply: reply,
       confidence_score: confidence,
       retrieved_article_ids: retrievedArticleIds,
@@ -93,9 +95,9 @@ export async function generateSuggestion(
 
   await writeAudit({
     orgId, userId: null, action: 'suggestion.created', resource: 'ticket_suggestions',
-    resourceId: inserted.id as string, metadata: { threadId: thread.id, confidence },
+    resourceId: inserted.id as string, metadata: { threadId, confidence },
   });
-  log.info('ticket suggestion created', { orgId, threadId: thread.id, confidence });
+  log.info('ticket suggestion created', { orgId, threadId, confidence });
 
   return { id: inserted.id as string, suggestedReply: reply, confidence, retrievedArticleIds, retrievedThreadIds };
 }

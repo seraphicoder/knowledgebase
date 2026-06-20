@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import {
   listApproved,
   suggestForThread,
+  suggestForText,
   listSuggestions,
   getSuggestion,
   decideSuggestion,
@@ -23,6 +24,8 @@ export function Replies() {
   const [error, setError] = useState<string | null>(null);
   const [genId, setGenId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [pasted, setPasted] = useState('');
+  const [pasteBusy, setPasteBusy] = useState(false);
 
   const loadSuggestions = useCallback(async () => {
     try {
@@ -57,6 +60,22 @@ export function Replies() {
     }
   }
 
+  async function onGenerateFromText() {
+    if (!pasted.trim()) return;
+    setPasteBusy(true);
+    setError(null);
+    try {
+      const res = await suggestForText(pasted.trim());
+      setPasted('');
+      await loadSuggestions();
+      setOpenId(res.suggestion.id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not generate a suggestion');
+    } finally {
+      setPasteBusy(false);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl p-6">
       <header className="mb-6 flex items-start justify-between">
@@ -82,7 +101,23 @@ export function Replies() {
       <div className="grid gap-6 md:grid-cols-2">
         {/* Pick a ticket to draft a reply for */}
         <section>
-          <h2 className="mb-2 text-sm font-medium text-gray-700">Draft a reply for a ticket</h2>
+          <h2 className="mb-2 text-sm font-medium text-gray-700">Paste a ticket that just came in</h2>
+          <textarea
+            className="mb-2 w-full rounded border border-gray-300 px-3 py-2 text-sm"
+            rows={4}
+            placeholder="Paste the customer's message here…"
+            value={pasted}
+            onChange={(e) => setPasted(e.target.value)}
+          />
+          <button
+            onClick={() => void onGenerateFromText()}
+            disabled={pasteBusy || !pasted.trim()}
+            className="mb-6 rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+          >
+            {pasteBusy ? 'Drafting…' : 'Draft reply'}
+          </button>
+
+          <h2 className="mb-2 text-sm font-medium text-gray-700">…or from an existing ticket</h2>
           <input
             type="search"
             placeholder="Search approved tickets…"
@@ -282,11 +317,13 @@ function SuggestionDrawer({ id, onClose, onChanged }: { id: string; onClose: () 
             </div>
 
             {/* The ticket */}
-            {data.ticket && (
+            {data.ticketText && (
               <details className="rounded border border-gray-200 p-3">
-                <summary className="cursor-pointer text-sm font-medium text-gray-700">Ticket: {data.ticket.subject || '(no subject)'}</summary>
+                <summary className="cursor-pointer text-sm font-medium text-gray-700">
+                  Ticket{data.ticket ? `: ${data.ticket.subject || '(no subject)'}` : ' (pasted)'}
+                </summary>
                 <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap rounded bg-gray-50 p-3 text-xs text-gray-700">
-                  {data.ticket.raw_content || '(empty)'}
+                  {data.ticketText}
                 </pre>
               </details>
             )}
