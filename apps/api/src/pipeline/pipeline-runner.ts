@@ -1,7 +1,7 @@
 import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
 import { log } from '../lib/logger.js';
-import { embedText } from './embedder.js';
+import { embedText, toVector } from './embedder.js';
 import { scoreRelevance, RELEVANCE_THRESHOLD } from './relevance-scorer.js';
 import { checkDuplicate } from './dedup-checker.js';
 import { extractKnowledge, ExtractionParseError } from './extractor.js';
@@ -64,7 +64,7 @@ export async function runPipeline(orgId: string): Promise<PipelineStats> {
         const embedding = await embedText(content);
         await db
           .from('email_threads')
-          .update({ embedding: embedding as unknown as string })
+          .update({ embedding: toVector(embedding) })
           .eq('id', id);
         stats.embedded++;
 
@@ -119,7 +119,7 @@ export async function runPipeline(orgId: string): Promise<PipelineStats> {
               tags: extraction.tags,
               confidence: extraction.confidence,
               caveats: extraction.caveats,
-              embedding: extractionEmbedding as unknown as string,
+              embedding: toVector(extractionEmbedding),
               status: 'pending_review',
               metadata: mergeMeta,
             })

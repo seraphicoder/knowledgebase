@@ -32,3 +32,12 @@ export async function embedText(text: string): Promise<number[]> {
   if (!vec) throw new Error('Embedding returned no vector');
   return vec;
 }
+
+/**
+ * pgvector's canonical text input is `[1,2,3]`. Passing a raw JS array to a
+ * vector column/param via PostgREST is ambiguous, so always serialize through
+ * this for inserts and RPC args.
+ */
+export function toVector(vec: number[]): string {
+  return `[${vec.join(',')}]`;
+}

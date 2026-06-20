@@ -190,3 +190,39 @@ export function updateFact(
 export function deleteFact(id: string): Promise<{ ok: boolean }> {
   return request(`/api/facts/${id}`, { method: 'DELETE' });
 }
+
+// ─── Knowledge base ─────────────────────────────────────────
+
+export interface KbArticleSummary {
+  id: string;
+  title: string;
+  category: string | null;
+  tags: string[];
+  published_at: string | null;
+}
+
+export interface KbArticleDetail extends KbArticleSummary {
+  body: string;
+  extraction_id: string | null;
+}
+
+export interface KbSearchResult {
+  id: string;
+  title: string;
+  body: string;
+  similarity: number | null;
+}
+
+export function listKb(): Promise<{ articles: KbArticleSummary[]; total: number }> {
+  return request('/api/kb');
+}
+
+export function getKbArticle(
+  id: string,
+): Promise<{ article: KbArticleDetail; source: { id: string; subject: string | null } | null }> {
+  return request(`/api/kb/${id}`);
+}
+
+export function searchKb(q: string): Promise<{ mode: 'semantic' | 'keyword'; results: KbSearchResult[] }> {
+  return request('/api/kb/search', { method: 'POST', body: JSON.stringify({ q }) });
+}

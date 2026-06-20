@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
+import { publishExtraction, type ExtractionForPublish } from '../pipeline/kb-publish.js';
 
 // Milestone 3 — Review Queue. Humans qualify AI-drafted extractions before they
 // become KB articles: edit the draft, then approve or reject. Every query is
@@ -99,19 +100,47 @@ review.patch('/extractions/:id', async (c) => {
 });
 
 // ─── POST /api/extractions/:id/approve | /reject ────────────
-const decide =
-  (status: 'approved' | 'rejected') =>
-  async (c: Context<{ Variables: AuthVars }>): Promise<Response> => {
+// Approve = publish to the KB. Reject = mark rejected. Both only act on drafts
+// still pending, keeping the action idempotent and auditable.
+review.post('/extractions/:id/approve', async (c: Context<{ Variables: AuthVars }>) => {
   const { orgId, userId, role } = c.get('auth');
   if (!canReview(role)) return c.json({ error: 'Only reviewers can qualify drafts' }, 403);
   const id = c.req.param('id');
   if (!id) return c.json({ error: 'Missing extraction id' }, 400);
   const db = getServiceClient();
 
-  // Only act on drafts still pending — keeps the action idempotent and auditable.
+  // Load the pending draft (org-scoped) including its embedding to copy to the article.
+  const { data: e, error } = await db
+    .from('extractions')
+    .select('id, question, answer, title, category, tags, caveats, embedding')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .eq('status', 'pending_review')
+    .single();
+  if (error || !e) return c.json({ error: 'No pending extraction with that id' }, 404);
+
+  await db
+    .from('extractions')
+    .update({ reviewed_by: userId, reviewed_at: new Date().toISOString() })
+    .eq('id', id);
+  try {
+    const articleId = await publishExtraction(db, orgId, userId, e as ExtractionForPublish);
+    return c.json({ ok: true, status: 'published', articleId });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Publish failed' }, 500);
+  }
+});
+
+review.post('/extractions/:id/reject', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!canReview(role)) return c.json({ error: 'Only reviewers can qualify drafts' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing extraction id' }, 400);
+  const db = getServiceClient();
+
   const { data, error } = await db
     .from('extractions')
-    .update({ status, reviewed_by: userId, reviewed_at: new Date().toISOString() })
+    .update({ status: 'rejected', reviewed_by: userId, reviewed_at: new Date().toISOString() })
     .eq('org_id', orgId)
     .eq('id', id)
     .eq('status', 'pending_review')
@@ -120,12 +149,7 @@ const decide =
   if (!data || data.length === 0) return c.json({ error: 'No pending extraction with that id' }, 404);
 
   await writeAudit({
-    orgId, userId,
-    action: status === 'approved' ? 'extraction.approved' : 'extraction.rejected',
-    resource: 'extractions', resourceId: id,
+    orgId, userId, action: 'extraction.rejected', resource: 'extractions', resourceId: id,
   });
-  return c.json({ ok: true, status });
-};
-
-review.post('/extractions/:id/approve', decide('approved'));
-review.post('/extractions/:id/reject', decide('rejected'));
+  return c.json({ ok: true, status: 'rejected' });
+});

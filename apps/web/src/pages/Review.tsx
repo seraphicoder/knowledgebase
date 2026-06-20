@@ -47,6 +47,7 @@ export function Review() {
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
             <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
             <span className="font-medium text-gray-900">Review</span>
+            <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Review Queue</h1>
@@ -236,7 +237,7 @@ function ReviewDrawer({
 
             <div className="flex items-center gap-2 border-t border-gray-100 pt-4">
               <button onClick={() => void onDecision('approve')} disabled={busy} className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
-                Approve
+                Approve &amp; Publish
               </button>
               <button onClick={() => void onDecision('reject')} disabled={busy} className="rounded bg-red-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
                 Reject

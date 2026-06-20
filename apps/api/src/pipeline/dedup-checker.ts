@@ -1,4 +1,5 @@
 import { getServiceClient } from '../lib/supabase.js';
+import { toVector } from './embedder.js';
 
 // Vector dedup gate. Before the Sonnet pass, compares a thread's embedding
 // against existing extractions for the same org via pgvector cosine distance.
@@ -21,7 +22,7 @@ export interface DedupResult {
 export async function checkDuplicate(orgId: string, embedding: number[]): Promise<DedupResult> {
   const { data, error } = await getServiceClient().rpc('match_extractions', {
     p_org_id: orgId,
-    p_query_embedding: embedding as unknown as string,
+    p_query_embedding: toVector(embedding),
     p_match_count: 5,
   });
   if (error) throw new Error(`dedup match query failed: ${error.message}`);

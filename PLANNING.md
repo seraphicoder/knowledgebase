@@ -521,7 +521,7 @@ The longer a customer uses MailMind, the more accurate it becomes for their spec
 
 ## Phase 1 Build Plan
 
-> **Status (current):** Milestones 1–3 built and deployed (single Railway service + Supabase). Plus, beyond the original plan: ingestion is **newest-first / resumable backfill**, the extractor is **multi-Q&A** (one thread → many drafts), and a **Domain Facts** grounding layer feeds the extraction prompt. Not yet built: similarity clustering, and Milestones 4–5.
+> **Status (current):** Milestones 1–4 built and deployed (single Railway service + Supabase): ingestion + staging, the AI extraction pipeline, the review queue, and a searchable knowledge base. Plus, beyond the original plan: ingestion is **newest-first / resumable backfill**, the extractor is **multi-Q&A** (one thread → many drafts), and a **Domain Facts** grounding layer feeds the extraction prompt. Not yet built: similarity clustering, KB export integrations (Notion/Confluence), and Milestone 5 (ticket-reply agent, SME grading, analytics).
 
 ### Milestone 1 — Ingestion Foundation ✅
 - [x] Connector interface / abstraction layer (`Connector`, `RawConversation`)
@@ -553,11 +553,12 @@ The longer a customer uses MailMind, the more accurate it becomes for their spec
 - [x] `domain_facts` table + RLS, CRUD API, management UI (`/facts`)
 - [x] Term-triggered + global facts injected into the extraction prompt as authoritative context
 
-### Milestone 4 — KB Output
-- [ ] Internal KB viewer — semantic search powered by pgvector
-- [ ] Keyword search fallback (Postgres full-text search)
-- [ ] Markdown export
-- [ ] Webhook / export to Notion or Confluence (basic)
+### Milestone 4 — KB Output ✅ (export integrations deferred)
+- [x] Publish on approve — reviewer "Approve & Publish" creates a `kb_articles` row (markdown body, copied embedding) and marks the extraction `published`
+- [x] Internal KB viewer — semantic search powered by pgvector (`match_kb_articles`), readable by the whole org (`/kb`)
+- [x] Keyword search fallback (`ilike`) when embeddings are unavailable or return nothing
+- [x] Markdown export — per-article `.md` download; each article traces back to its source thread
+- [ ] Webhook / export to Notion or Confluence *(deferred)*
 
 ### Milestone 5 — KB Usage & Ticket Agent
 - [ ] KB semantic Q&A interface (RAG search)
@@ -743,4 +744,4 @@ Before pitching direct mailbox access to any customer:
 
 ---
 
-*Document version: 0.8 — Reflects shipped state: Milestones 1–3 built (ingestion + staging, multi-Q&A extraction pipeline, review queue), newest-first resumable backfill, and a Domain Facts grounding layer. Phase-1 build plan marked up to current status.*
+*Document version: 0.9 — Reflects shipped state: Milestones 1–4 built (ingestion + staging, multi-Q&A extraction pipeline, review queue, searchable knowledge base with publish-on-approve), newest-first resumable backfill, and a Domain Facts grounding layer. Phase-1 build plan marked up to current status.*

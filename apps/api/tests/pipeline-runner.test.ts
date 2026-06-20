@@ -14,6 +14,7 @@ vi.mock('../src/lib/supabase.js', () => ({ getServiceClient: () => fake }));
 vi.mock('../src/pipeline/embedder.js', () => ({
   embedText: vi.fn(async () => Array(1536).fill(0.01)),
   embedTexts: vi.fn(async (xs: string[]) => xs.map(() => Array(1536).fill(0.01))),
+  toVector: (v: number[]) => `[${v.join(',')}]`,
 }));
 vi.mock('../src/pipeline/relevance-scorer.js', () => ({
   RELEVANCE_THRESHOLD: 0.4,

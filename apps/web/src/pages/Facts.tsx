@@ -82,6 +82,7 @@ export function Facts() {
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
             <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
+            <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <span className="font-medium text-gray-900">Domain Facts</span>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Domain Facts</h1>
