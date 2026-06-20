@@ -6,6 +6,7 @@ import { Staging } from './pages/Staging';
 import { Approved } from './pages/Approved';
 import { Review } from './pages/Review';
 import { KB } from './pages/KB';
+import { Replies } from './pages/Replies';
 import { Facts } from './pages/Facts';
 import { Login } from './pages/Login';
 import { useSession } from './lib/useSession';
@@ -68,6 +69,14 @@ createRoot(rootEl).render(
           element={
             <RequireAuth>
               <KB />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/replies"
+          element={
+            <RequireAuth>
+              <Replies />
             </RequireAuth>
           }
         />

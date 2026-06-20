@@ -72,6 +72,7 @@ export function KB() {
             <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <span className="font-medium text-gray-900">Knowledge Base</span>
+            <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Knowledge Base</h1>

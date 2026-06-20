@@ -16,15 +16,15 @@ This repo implements **Phase 1 (Milestones 1–4)** plus a domain-grounding laye
 apps/
   api/                 # Hono + TypeScript backend
     src/
-      pipeline/        # connectors, reconstructor, noise filter, store, attachment-store, AI stages, domain-facts, kb-publish, runner
-      routes/          # staging.ts, pipeline.ts, review.ts, facts.ts, kb.ts (KB read/search)
+      pipeline/        # connectors, reconstructor, noise filter, store, attachment-store, AI stages, domain-facts, kb-publish, ticket-agent, runner
+      routes/          # staging.ts, pipeline.ts, review.ts, facts.ts, kb.ts, tickets.ts (reply agent)
       lib/             # env, supabase, auth, audit, crypto, ai, retry, logger
     scripts/           # test-ingest.ts, set-source-credentials.ts
     tests/             # Vitest
   web/                 # React + Vite + Tailwind
-    src/pages/         # Login, Staging, Approved, Review, KB, Facts
+    src/pages/         # Login, Staging, Approved, Review, KB, Replies, Facts
     src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs
 ```
 
 ## Setup
@@ -152,7 +152,13 @@ via a lazy-loaded canvas editor); on Approve & Publish only the chosen/edited
 images attach to the article (`kb_article_images`, migration 009). Images only for
 now (no AI vision yet).
 
-Not yet built: KB export to Notion/Confluence (M4 stretch), the Layer 2–3 KB
-usage features (ticket-reply agent, SME grading → verified pairs / M5, analytics),
-similarity clustering, and all of Phase 2 (Microsoft Graph, PST/MBOX upload,
-scheduled ingestion, offboarding). See PLANNING.md.
+Reply Agent (`/replies`, Milestone 5): pick a ticket → a KB-grounded **suggested
+reply** is drafted (Sonnet over retrieved KB articles + similar past threads +
+verified pairs) with a **composite confidence score** and cited sources. Edit /
+accept / discard / copy — it **never sends**. SME scoring (correct / partial /
+wrong + corrections) feeds **verified Q&A pairs** that get priority retrieval on
+future tickets — the feedback loop that improves accuracy over time.
+
+Not yet built: KB export to Notion/Confluence (M4 stretch), an analytics/deflection
+dashboard, AI vision on images, similarity clustering, and all of Phase 2
+(Microsoft Graph, PST/MBOX upload, scheduled ingestion, offboarding). See PLANNING.md.

@@ -9,6 +9,7 @@ import { pipeline } from './routes/pipeline.js';
 import { review } from './routes/review.js';
 import { facts } from './routes/facts.js';
 import { kb } from './routes/kb.js';
+import { tickets } from './routes/tickets.js';
 import { env } from './lib/env.js';
 import { log } from './lib/logger.js';
 
@@ -32,6 +33,7 @@ app.route('/api', pipeline);
 app.route('/api', review);
 app.route('/api', facts);
 app.route('/api', kb);
+app.route('/api', tickets);
 
 // Single-service deploy: serve the built SPA same-origin from this server.
 // Only mounted when a build is present (it isn't in local dev — use the Vite

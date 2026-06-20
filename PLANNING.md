@@ -549,7 +549,7 @@ The longer a customer uses MailMind, the more accurate it becomes for their spec
 
 ## Phase 1 Build Plan
 
-> **Status (current):** Milestones 1–4 built and deployed (single Railway service + Supabase): ingestion + staging, the AI extraction pipeline, the review queue, and a searchable knowledge base. Plus, beyond the original plan: ingestion is **newest-first / resumable backfill**, the extractor is **multi-Q&A** (one thread → many drafts), and a **Domain Facts** grounding layer feeds the extraction prompt. Not yet built: similarity clustering, KB export integrations (Notion/Confluence), and Milestone 5 (ticket-reply agent, SME grading, analytics).
+> **Status (current):** Milestones 1–5 built and deployed (single Railway service + Supabase): ingestion + staging, the AI extraction pipeline, the review queue, a searchable + editable knowledge base, and the reply agent with SME feedback loop. Beyond the original plan: **newest-first / resumable** ingestion, **multi-Q&A** extraction, a **Domain Facts** grounding layer, and **image capture + curation + a crop/annotate editor**. Not yet built: similarity clustering, KB export integrations (Notion/Confluence), the analytics/deflection dashboard, AI vision on images, and Phase 2.
 
 ### Milestone 1 — Ingestion Foundation ✅
 - [x] Connector interface / abstraction layer (`Connector`, `RawConversation`)
@@ -588,12 +588,12 @@ The longer a customer uses MailMind, the more accurate it becomes for their spec
 - [x] Markdown export — per-article `.md` download; each article traces back to its source thread
 - [ ] Webhook / export to Notion or Confluence *(deferred)*
 
-### Milestone 5 — KB Usage & Ticket Agent
-- [ ] KB semantic Q&A interface (RAG search)
-- [ ] Incoming ticket agent — auto-draft suggested reply with confidence score
-- [ ] SME review interface — score suggestions, write corrections
-- [ ] Verified pairs storage and retrieval weighting
-- [ ] KB analytics dashboard — deflection rate, confidence trends, correction rate
+### Milestone 5 — KB Usage & Ticket Agent ✅ (analytics dashboard pending)
+- [x] KB semantic Q&A interface (RAG search) — `/kb` semantic + keyword search (M4)
+- [x] Incoming ticket agent — suggested reply (Sonnet over KB + similar threads + verified pairs) with composite confidence; **never auto-sends** (`/replies`)
+- [x] SME review interface — score suggestions (correct/partial/wrong), write corrections
+- [x] Verified pairs storage and retrieval weighting — corrections become `verified_pairs`, retrieved as priority context (`match_verified_pairs`)
+- [ ] KB analytics dashboard — deflection rate, confidence trends, correction rate *(pending)*
 
 ---
 
@@ -772,4 +772,4 @@ Before pitching direct mailbox access to any customer:
 
 ---
 
-*Document version: 0.9 — Reflects shipped state: Milestones 1–4 built (ingestion + staging, multi-Q&A extraction pipeline, review queue, searchable knowledge base with publish-on-approve), newest-first resumable backfill, and a Domain Facts grounding layer. Phase-1 build plan marked up to current status.*
+*Document version: 1.0 — Reflects shipped state: Milestones 1–5 (ingestion + staging, multi-Q&A extraction, review queue, searchable/editable KB, reply agent + SME feedback loop), plus newest-first resumable ingestion, Domain Facts grounding, and image capture/curation/editing. Remaining: analytics dashboard, AI vision, similarity clustering, Phase 2.*

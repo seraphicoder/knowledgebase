@@ -67,6 +67,7 @@ export function Approved() {
             <span className="font-medium text-gray-900">Approved</span>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
+            <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Approved Threads</h1>

@@ -60,6 +60,7 @@ export function Review() {
             <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
             <span className="font-medium text-gray-900">Review</span>
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
+            <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Review Queue</h1>

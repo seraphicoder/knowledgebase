@@ -264,3 +264,71 @@ export function searchKb(q: string): Promise<{ mode: 'semantic' | 'keyword'; res
 export function unpublishArticle(id: string): Promise<{ ok: boolean; extractionId: string }> {
   return request(`/api/kb/${id}/unpublish`, { method: 'POST' });
 }
+
+// ─── Reply agent (suggested ticket replies) ─────────────────
+
+export interface SuggestionSummary {
+  id: string;
+  source_thread_id: string;
+  suggested_reply: string | null;
+  confidence_score: number | null;
+  status: string;
+  created_at: string;
+}
+
+export interface SuggestionDetail extends SuggestionSummary {
+  retrieved_article_ids: string[];
+  retrieved_thread_ids: string[];
+  final_reply: string | null;
+}
+
+export interface SuggestionReview {
+  verdict: string;
+  accuracy_score: number | null;
+  completeness_score: number | null;
+  corrected_answer: string | null;
+  notes: string | null;
+  reviewed_at: string;
+}
+
+export interface SuggestionDetailResponse {
+  suggestion: SuggestionDetail;
+  ticket: { id: string; subject: string | null; raw_content: string | null } | null;
+  citedArticles: { id: string; title: string }[];
+  citedThreads: { id: string; subject: string | null }[];
+  review: SuggestionReview | null;
+}
+
+export function suggestForThread(threadId: string): Promise<{
+  suggestion: { id: string; suggestedReply: string; confidence: number };
+}> {
+  return request(`/api/tickets/${threadId}/suggest`, { method: 'POST' });
+}
+
+export function listSuggestions(status?: string): Promise<{ suggestions: SuggestionSummary[] }> {
+  return request(`/api/suggestions${status ? `?status=${encodeURIComponent(status)}` : ''}`);
+}
+
+export function getSuggestion(id: string): Promise<SuggestionDetailResponse> {
+  return request(`/api/suggestions/${id}`);
+}
+
+export function decideSuggestion(
+  id: string,
+  body: { status: 'accepted' | 'edited' | 'discarded'; finalReply?: string },
+): Promise<{ ok: boolean }> {
+  return request(`/api/suggestions/${id}/decision`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+export function reviewSuggestion(
+  id: string,
+  body: {
+    verdict: 'correct' | 'partial' | 'wrong';
+    accuracyScore?: number;
+    completenessScore?: number;
+    correctedAnswer?: string;
+    notes?: string;
+  },
+): Promise<{ ok: boolean; verifiedPairId: string | null }> {
+  return request(`/api/suggestions/${id}/review`, { method: 'POST', body: JSON.stringify(body) });
+}
