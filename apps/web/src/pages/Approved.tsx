@@ -7,6 +7,7 @@ import {
   type ThreadDetail,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { ThreadImages } from '../components/ThreadImages';
 
 // Approved threads leave the Staging list, so this read-only tab is where you
 // see what's been approved, its pipeline state, and the original source content.
@@ -171,6 +172,7 @@ function PreviewDrawer({ thread, onClose }: { thread: ThreadDetail; onClose: () 
         <pre className="whitespace-pre-wrap rounded bg-gray-50 p-3 text-sm text-gray-800">
           {thread.raw_content || '(empty)'}
         </pre>
+        <ThreadImages threadId={thread.id} />
       </div>
     </div>
   );

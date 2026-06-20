@@ -16,14 +16,15 @@ This repo implements **Phase 1 (Milestones 1–4)** plus a domain-grounding laye
 apps/
   api/                 # Hono + TypeScript backend
     src/
-      pipeline/        # connectors, reconstructor, noise filter, store, AI stages, domain-facts, kb-publish, runner
+      pipeline/        # connectors, reconstructor, noise filter, store, attachment-store, AI stages, domain-facts, kb-publish, runner
       routes/          # staging.ts, pipeline.ts, review.ts, facts.ts, kb.ts (KB read/search)
       lib/             # env, supabase, auth, audit, crypto, ai, retry, logger
     scripts/           # test-ingest.ts, set-source-credentials.ts
     tests/             # Vitest
   web/                 # React + Vite + Tailwind
     src/pages/         # Login, Staging, Approved, Review, KB, Facts
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts
+    src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images
 ```
 
 ## Setup
@@ -140,6 +141,14 @@ Domain Facts (`/facts`): org-authored authoritative facts/rules injected into th
 extraction prompt so the AI uses the customer's truth instead of its assumptions
 (e.g. "Model XYZ is roll-to-roll, not flatbed"). Term-triggered facts apply when
 the term appears in a thread; termless facts are global rules.
+
+Image attachments: images on Zendesk tickets and emails are captured during
+ingestion and stored in a private Supabase Storage bucket (migration 008), shown
+as thumbnails via short-lived signed URLs. In **Review**, each draft's source
+images can be **included/excluded** and **edited** (crop + text/shapes/freehand,
+via a lazy-loaded canvas editor); on Approve & Publish only the chosen/edited
+images attach to the article (`kb_article_images`, migration 009). Images only for
+now (no AI vision yet).
 
 Not yet built: KB export to Notion/Confluence (M4 stretch), the Layer 2–3 KB
 usage features (ticket-reply agent, SME grading → verified pairs / M5, analytics),

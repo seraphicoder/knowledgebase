@@ -2,6 +2,7 @@ import { createConnector, type IngestionSourceRow } from './connector-factory.js
 import { reconstructThreads } from './thread-reconstructor.js';
 import { filterThread } from './noise-filter.js';
 import { storeThreads, type StoreResult } from './thread-store.js';
+import { storeAttachments } from './attachment-store.js';
 import { getServiceClient } from '../lib/supabase.js';
 import { log } from '../lib/logger.js';
 
@@ -41,6 +42,9 @@ export async function ingestSource(
   const threads = reconstructThreads(page.conversations, source.type);
   const cleaned = threads.map(filterThread);
   const result = await storeThreads(cleaned, { orgId: source.org_id, sourceId: source.id });
+
+  // Persist image attachments for the newly stored threads (no AI; storage only).
+  await storeAttachments(cleaned, result.insertedThreads, { orgId: source.org_id });
 
   const backfillComplete = page.nextCursor === null;
   await db

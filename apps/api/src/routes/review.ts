@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
-import { publishExtraction, type ExtractionForPublish } from '../pipeline/kb-publish.js';
+import { publishExtraction, type ExtractionForPublish, type PublishImage } from '../pipeline/kb-publish.js';
 
 // Milestone 3 — Review Queue. Humans qualify AI-drafted extractions before they
 // become KB articles: edit the draft, then approve or reject. Every query is
@@ -109,22 +109,25 @@ review.post('/extractions/:id/approve', async (c: Context<{ Variables: AuthVars 
   if (!id) return c.json({ error: 'Missing extraction id' }, 400);
   const db = getServiceClient();
 
-  // Load the pending draft (org-scoped) including its embedding to copy to the article.
+  // Load the pending draft (org-scoped) including its embedding + thread for images.
   const { data: e, error } = await db
     .from('extractions')
-    .select('id, question, answer, title, category, tags, caveats, embedding')
+    .select('id, thread_id, question, answer, title, category, tags, caveats, embedding')
     .eq('org_id', orgId)
     .eq('id', id)
     .eq('status', 'pending_review')
     .single();
   if (error || !e) return c.json({ error: 'No pending extraction with that id' }, 404);
 
+  // Optional curated image set: omitted => publish includes all source images.
+  const body = (await c.req.json().catch(() => ({}))) as { images?: PublishImage[] };
+
   await db
     .from('extractions')
     .update({ reviewed_by: userId, reviewed_at: new Date().toISOString() })
     .eq('id', id);
   try {
-    const articleId = await publishExtraction(db, orgId, userId, e as ExtractionForPublish);
+    const articleId = await publishExtraction(db, orgId, userId, e as ExtractionForPublish, body.images);
     return c.json({ ok: true, status: 'published', articleId });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Publish failed' }, 500);

@@ -15,6 +15,8 @@ import type { CleanThread } from './noise-filter.js';
 export interface StoreResult {
   inserted: number;
   duplicatesSkipped: number;
+  /** Newly inserted threads, for linking attachments (externalId -> db id). */
+  insertedThreads: { id: string; externalId: string }[];
 }
 
 const BATCH_SIZE = 200;
@@ -23,7 +25,7 @@ export async function storeThreads(
   threads: CleanThread[],
   ctx: { orgId: string; sourceId: string },
 ): Promise<StoreResult> {
-  if (threads.length === 0) return { inserted: 0, duplicatesSkipped: 0 };
+  if (threads.length === 0) return { inserted: 0, duplicatesSkipped: 0, insertedThreads: [] };
 
   const db = getServiceClient();
 
@@ -42,6 +44,7 @@ export async function storeThreads(
   const duplicatesSkipped = threads.length - fresh.length;
 
   let inserted = 0;
+  const insertedThreads: { id: string; externalId: string }[] = [];
   for (let i = 0; i < fresh.length; i += BATCH_SIZE) {
     const chunk = fresh.slice(i, i + BATCH_SIZE);
     const rows = chunk.map((t) => ({
@@ -67,11 +70,14 @@ export async function storeThreads(
         onConflict: 'org_id,source_id,external_thread_id',
         ignoreDuplicates: true,
       })
-      .select('id');
+      .select('id, external_thread_id');
     if (error) throw new Error(`thread-store insert failed: ${error.message}`);
 
     const insertedRows = data ?? [];
     inserted += insertedRows.length;
+    for (const r of insertedRows) {
+      insertedThreads.push({ id: r.id as string, externalId: r.external_thread_id as string });
+    }
 
     const audits: AuditEntry[] = insertedRows.map((r) => ({
       orgId: ctx.orgId,
@@ -90,5 +96,5 @@ export async function storeThreads(
     inserted,
     duplicatesSkipped,
   });
-  return { inserted, duplicatesSkipped };
+  return { inserted, duplicatesSkipped, insertedThreads };
 }

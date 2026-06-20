@@ -86,6 +86,38 @@ staging.get('/threads/:id', async (c) => {
   return c.json({ thread: data });
 });
 
+// ─── GET /api/threads/:id/attachments — images w/ signed URLs ──
+staging.get('/threads/:id/attachments', async (c) => {
+  const { orgId } = c.get('auth');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing thread id' }, 400);
+  const db = getServiceClient();
+
+  const { data: rows, error } = await db
+    .from('attachments')
+    .select('id, filename, content_type, size, storage_path, inline')
+    .eq('org_id', orgId)
+    .eq('thread_id', id)
+    .order('created_at', { ascending: true });
+  if (error) return c.json({ error: error.message }, 500);
+  if (!rows || rows.length === 0) return c.json({ attachments: [] });
+
+  // Short-lived signed URLs keep the bucket private and access org-scoped.
+  const paths = rows.map((r) => r.storage_path as string);
+  const { data: signed, error: sErr } = await db.storage.from('attachments').createSignedUrls(paths, 3600);
+  if (sErr) return c.json({ error: sErr.message }, 500);
+  const urlByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+
+  const attachments = rows.map((r) => ({
+    id: r.id,
+    filename: r.filename,
+    content_type: r.content_type,
+    inline: r.inline,
+    url: urlByPath.get(r.storage_path as string) ?? null,
+  }));
+  return c.json({ attachments });
+});
+
 // ─── POST /api/threads/:id/approve ──────────────────────────
 staging.post('/threads/:id/approve', async (c) => {
   const { orgId, userId } = c.get('auth');

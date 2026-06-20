@@ -19,6 +19,16 @@ export interface RawMessage {
   /** Optional threading headers (IMAP). Connectors omit when not applicable. */
   messageId?: string;
   inReplyTo?: string;
+  /** Image attachments captured with their bytes; stored after the thread is. */
+  attachments?: RawAttachment[];
+}
+
+export interface RawAttachment {
+  filename: string;
+  contentType: string;
+  size: number;
+  inline: boolean;
+  data: Buffer; // raw bytes — uploaded to Supabase Storage by the attachment step
 }
 
 export interface FetchOptions {

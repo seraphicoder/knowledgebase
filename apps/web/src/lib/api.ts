@@ -68,6 +68,29 @@ export function getThread(id: string): Promise<{ thread: ThreadDetail }> {
   return request(`/api/threads/${id}`);
 }
 
+export interface ThreadAttachment {
+  id: string;
+  filename: string | null;
+  content_type: string | null;
+  inline: boolean;
+  url: string | null;
+}
+
+export function listThreadAttachments(threadId: string): Promise<{ attachments: ThreadAttachment[] }> {
+  return request(`/api/threads/${threadId}/attachments`);
+}
+
+export interface ArticleImage {
+  id: string;
+  content_type: string | null;
+  edited: boolean;
+  url: string | null;
+}
+
+export function listArticleImages(articleId: string): Promise<{ images: ArticleImage[] }> {
+  return request(`/api/kb/${articleId}/images`);
+}
+
 export interface ApprovedThread extends StagedThread {
   approved_at: string | null;
   processing_status: string;
@@ -153,8 +176,19 @@ export function editExtraction(id: string, patch: ExtractionEdit): Promise<{ ok:
   return request(`/api/extractions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
-export function approveExtraction(id: string): Promise<{ ok: boolean; status: string }> {
-  return request(`/api/extractions/${id}/approve`, { method: 'POST' });
+export interface PublishImageInput {
+  sourceAttachmentId: string;
+  editedDataUrl?: string | null;
+}
+
+export function approveExtraction(
+  id: string,
+  images?: PublishImageInput[],
+): Promise<{ ok: boolean; status: string; articleId?: string }> {
+  return request(`/api/extractions/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify(images ? { images } : {}),
+  });
 }
 
 export function rejectExtraction(id: string): Promise<{ ok: boolean; status: string }> {

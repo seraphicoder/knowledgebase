@@ -65,6 +65,36 @@ kb.get('/kb/:id', async (c: Context<{ Variables: AuthVars }>) => {
   return c.json({ article, source });
 });
 
+// ─── GET /api/kb/:id/images — the article's curated images ──
+kb.get('/kb/:id/images', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId } = c.get('auth');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+  const db = getServiceClient();
+
+  const { data: rows, error } = await db
+    .from('kb_article_images')
+    .select('id, storage_path, content_type, edited')
+    .eq('org_id', orgId)
+    .eq('kb_article_id', id)
+    .order('position', { ascending: true });
+  if (error) return c.json({ error: error.message }, 500);
+  if (!rows || rows.length === 0) return c.json({ images: [] });
+
+  const paths = rows.map((r) => r.storage_path as string);
+  const { data: signed, error: sErr } = await db.storage.from('attachments').createSignedUrls(paths, 3600);
+  if (sErr) return c.json({ error: sErr.message }, 500);
+  const urlByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+
+  const images = rows.map((r) => ({
+    id: r.id,
+    content_type: r.content_type,
+    edited: r.edited,
+    url: urlByPath.get(r.storage_path as string) ?? null,
+  }));
+  return c.json({ images });
+});
+
 // ─── POST /api/kb/search — semantic search w/ keyword fallback ──
 const searchSchema = z.object({ q: z.string().trim().min(1), limit: z.number().int().positive().max(20).optional() });
 

@@ -9,6 +9,7 @@ import {
   type KbSearchResult,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { ArticleImages } from '../components/ThreadImages';
 
 // Milestone 4 — Knowledge Base. Staff search published articles in plain language
 // (semantic via pgvector, keyword fallback) and read them. Articles are published
@@ -218,6 +219,7 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
               <button onClick={download} className="ml-auto rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50">Download .md</button>
             </div>
             <Markdown body={article.body} />
+            <ArticleImages articleId={article.id} />
             {source && (
               <p className="mt-4 border-t border-gray-100 pt-3 text-xs text-gray-500">
                 Source thread: <span className="font-medium text-gray-700">{source.subject || '(no subject)'}</span>

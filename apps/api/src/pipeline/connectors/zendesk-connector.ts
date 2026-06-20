@@ -1,4 +1,4 @@
-import type { Connector, FetchOptions, FetchPage, RawConversation, RawMessage, ZendeskConfig } from '../connector.js';
+import type { Connector, FetchOptions, FetchPage, RawAttachment, RawConversation, RawMessage, ZendeskConfig } from '../connector.js';
 import { withRetry, isRetryableHttpStatus } from '../../lib/retry.js';
 import { log } from '../../lib/logger.js';
 
@@ -26,7 +26,19 @@ interface ZendeskComment {
   body?: string;
   html_body?: string;
   created_at: string;
+  attachments?: ZendeskAttachment[];
 }
+
+interface ZendeskAttachment {
+  id: number;
+  file_name: string;
+  content_url: string;
+  content_type: string;
+  size: number;
+  inline?: boolean;
+}
+
+const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024; // skip anything larger than 25 MB
 
 interface TicketsCursorResponse {
   tickets: ZendeskTicket[];
@@ -124,6 +136,37 @@ export class ZendeskConnector implements Connector {
     return `/api/v2/tickets.json?${parts.join('&')}`;
   }
 
+  // Download image attachments (bytes) for a comment. Non-images are ignored;
+  // oversized files are skipped. Failures are logged, never fatal.
+  private async downloadImages(atts: ZendeskAttachment[]): Promise<RawAttachment[]> {
+    const out: RawAttachment[] = [];
+    for (const a of atts) {
+      if (!a.content_type?.startsWith('image/')) continue;
+      if (a.size && a.size > MAX_ATTACHMENT_BYTES) continue;
+      try {
+        const res = await fetch(a.content_url, { headers: { Authorization: this.authHeader } });
+        if (!res.ok) {
+          log.info('Zendesk attachment download failed', { status: res.status, file: a.file_name });
+          continue;
+        }
+        const data = Buffer.from(await res.arrayBuffer());
+        out.push({
+          filename: a.file_name,
+          contentType: a.content_type,
+          size: data.length,
+          inline: Boolean(a.inline),
+          data,
+        });
+        await sleep(RATE_LIMIT_DELAY_MS);
+      } catch (err) {
+        log.info('Zendesk attachment error', {
+          file: a.file_name, error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return out;
+  }
+
   private async fetchComments(ticketId: number): Promise<ZendeskComment[]> {
     const out: ZendeskComment[] = [];
     let url: string | null = `/api/v2/tickets/${ticketId}/comments.json`;
@@ -141,13 +184,18 @@ export class ZendeskConnector implements Connector {
     ticket: ZendeskTicket,
     comments: ZendeskComment[],
   ): Promise<RawConversation> {
-    const messages: RawMessage[] = comments.map((c) => ({
-      author: `user:${c.author_id}`, // resolved lazily below for participants
-      // Prefer plain_body (never html_body). Some comments (voice/system) carry
-      // no plain_body, so fall back to body, then empty string — never undefined.
-      body: c.plain_body ?? c.body ?? '',
-      timestamp: new Date(c.created_at),
-    }));
+    const messages: RawMessage[] = [];
+    for (const c of comments) {
+      const images = c.attachments?.length ? await this.downloadImages(c.attachments) : [];
+      messages.push({
+        author: `user:${c.author_id}`, // resolved lazily below for participants
+        // Prefer plain_body (never html_body). Some comments (voice/system) carry
+        // no plain_body, so fall back to body, then empty string — never undefined.
+        body: c.plain_body ?? c.body ?? '',
+        timestamp: new Date(c.created_at),
+        attachments: images.length ? images : undefined,
+      });
+    }
 
     const participants: string[] = [];
     for (const id of [ticket.requester_id, ticket.assignee_id]) {

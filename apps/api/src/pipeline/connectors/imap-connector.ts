@@ -1,6 +1,6 @@
 import { ImapFlow } from 'imapflow';
 import { simpleParser } from 'mailparser';
-import type { Connector, FetchOptions, FetchPage, ImapConfig, RawConversation, RawMessage } from '../connector.js';
+import type { Connector, FetchOptions, FetchPage, ImapConfig, RawAttachment, RawConversation, RawMessage } from '../connector.js';
 import { withRetry } from '../../lib/retry.js';
 import { log } from '../../lib/logger.js';
 
@@ -68,12 +68,14 @@ export class ImapConnector implements Connector {
           const timestamp = parsed.date ?? msg.envelope?.date ?? new Date();
           const author = parsed.from?.value?.[0]?.address ?? parsed.from?.text ?? 'unknown';
 
+          const images = imageAttachments(parsed);
           const message: RawMessage = {
             author,
             body: (parsed.text ?? stripHtml(parsed.html || '')).trim(),
             timestamp,
             messageId: parsed.messageId,
             inReplyTo: firstInReplyTo(parsed.inReplyTo),
+            attachments: images.length ? images : undefined,
           };
 
           conversations.push({
@@ -102,6 +104,23 @@ export class ImapConnector implements Connector {
     log.info('IMAP fetch complete', { count: conversations.length, cursor, nextCursor });
     return { conversations, nextCursor };
   }
+}
+
+function imageAttachments(parsed: import('mailparser').ParsedMail): RawAttachment[] {
+  const out: RawAttachment[] = [];
+  for (const a of parsed.attachments ?? []) {
+    const ct = a.contentType ?? '';
+    if (!ct.startsWith('image/')) continue;
+    if (!a.content || a.content.length > 25 * 1024 * 1024) continue;
+    out.push({
+      filename: a.filename ?? `image-${out.length + 1}`,
+      contentType: ct,
+      size: a.content.length,
+      inline: Boolean(a.related),
+      data: a.content,
+    });
+  }
+  return out;
 }
 
 function collectAddresses(parsed: import('mailparser').ParsedMail): string[] {

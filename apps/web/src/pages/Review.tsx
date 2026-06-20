@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   listExtractions,
@@ -6,11 +6,22 @@ import {
   editExtraction,
   approveExtraction,
   rejectExtraction,
+  listThreadAttachments,
   type Extraction,
   type ExtractionSourceThread,
   type ExtractionEdit,
+  type ThreadAttachment,
+  type PublishImageInput,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
+
+// Heavy canvas editor — lazy-loaded so it stays out of the main bundle.
+const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
+
+interface ImageChoice {
+  included: boolean;
+  editedDataUrl?: string;
+}
 
 // Milestone 3 Review Queue. Humans qualify AI-drafted extractions: edit the
 // title/question/answer, then approve (becomes eligible to publish) or reject.
@@ -129,20 +140,58 @@ function ReviewDrawer({
   const [thread, setThread] = useState<ExtractionSourceThread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [images, setImages] = useState<ThreadAttachment[]>([]);
+  const [choices, setChoices] = useState<Record<string, ImageChoice>>({});
+  const [editing, setEditing] = useState<{ id: string; source: string } | null>(null);
 
   useEffect(() => {
     let active = true;
     getExtraction(id)
-      .then((res) => {
+      .then(async (res) => {
         if (!active) return;
         setDraft(res.extraction);
         setThread(res.thread);
+        // Load the source thread's images and default them all to "included".
+        if (res.thread) {
+          const att = await listThreadAttachments(res.thread.id).catch(() => ({ attachments: [] }));
+          if (!active) return;
+          setImages(att.attachments);
+          setChoices(Object.fromEntries(att.attachments.map((a) => [a.id, { included: true }])));
+        }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load draft'));
     return () => {
       active = false;
     };
   }, [id]);
+
+  function imagePayload(): PublishImageInput[] {
+    return images
+      .filter((a) => choices[a.id]?.included)
+      .map((a) => ({ sourceAttachmentId: a.id, editedDataUrl: choices[a.id]?.editedDataUrl ?? null }));
+  }
+
+  // Open the editor with a data URL (avoids tainted-canvas on cross-origin images).
+  async function openEditor(att: ThreadAttachment) {
+    const existing = choices[att.id]?.editedDataUrl;
+    if (existing) {
+      setEditing({ id: att.id, source: existing });
+      return;
+    }
+    if (!att.url) return;
+    try {
+      const blob = await (await fetch(att.url)).blob();
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const fr = new FileReader();
+        fr.onload = () => resolve(fr.result as string);
+        fr.onerror = reject;
+        fr.readAsDataURL(blob);
+      });
+      setEditing({ id: att.id, source: dataUrl });
+    } catch {
+      setError('Could not open the image for editing.');
+    }
+  }
 
   function set<K extends keyof Extraction>(key: K, value: Extraction[K]) {
     setDraft((d) => (d ? { ...d, [key]: value } : d));
@@ -184,7 +233,7 @@ function ReviewDrawer({
           caveats: draft.caveats,
         });
       }
-      await (kind === 'approve' ? approveExtraction(id) : rejectExtraction(id));
+      await (kind === 'approve' ? approveExtraction(id, imagePayload()) : rejectExtraction(id));
       onResolved();
     } catch (e) {
       setError(e instanceof Error ? e.message : `${kind} failed`);
@@ -193,6 +242,7 @@ function ReviewDrawer({
   }
 
   return (
+    <>
     <div className="fixed inset-0 z-10 flex justify-end bg-black/20" onClick={onClose}>
       <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="mb-4 flex items-start justify-between">
@@ -233,6 +283,46 @@ function ReviewDrawer({
               <textarea className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm" rows={2} value={draft.caveats ?? ''} onChange={(e) => set('caveats', e.target.value)} />
             </Field>
 
+            {images.length > 0 && (
+              <div className="border-t border-gray-100 pt-4">
+                <h3 className="mb-2 text-sm font-medium text-gray-700">
+                  Images ({images.filter((a) => choices[a.id]?.included).length}/{images.length} included)
+                </h3>
+                <p className="mb-2 text-xs text-gray-400">Uncheck to leave an image off the published article, or edit to crop/annotate it.</p>
+                <div className="flex flex-wrap gap-3">
+                  {images.map((a) => {
+                    const ch = choices[a.id];
+                    const preview = ch?.editedDataUrl ?? a.url ?? '';
+                    return (
+                      <div key={a.id} className="w-28">
+                        <div className={`relative rounded border ${ch?.included ? 'border-emerald-400' : 'border-gray-200 opacity-50'}`}>
+                          {preview && <img src={preview} alt={a.filename ?? ''} className="h-24 w-full rounded object-cover" />}
+                          {ch?.editedDataUrl && (
+                            <span className="absolute left-1 top-1 rounded bg-blue-600 px-1 text-[10px] text-white">edited</span>
+                          )}
+                        </div>
+                        <div className="mt-1 flex items-center justify-between text-xs">
+                          <label className="flex items-center gap-1">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(ch?.included)}
+                              onChange={(e) =>
+                                setChoices((s) => ({ ...s, [a.id]: { ...s[a.id], included: e.target.checked } }))
+                              }
+                            />
+                            include
+                          </label>
+                          <button type="button" onClick={() => void openEditor(a)} className="text-blue-700 hover:underline">
+                            edit
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <p className="text-xs text-gray-500">AI confidence: {fmtConfidence(draft.confidence)}</p>
 
             <div className="flex items-center gap-2 border-t border-gray-100 pt-4">
@@ -263,6 +353,26 @@ function ReviewDrawer({
         )}
       </div>
     </div>
+
+      {editing && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 text-sm text-white">
+              Loading editor…
+            </div>
+          }
+        >
+          <ImageEditorModal
+            source={editing.source}
+            onClose={() => setEditing(null)}
+            onSave={(dataUrl) => {
+              setChoices((s) => ({ ...s, [editing.id]: { included: true, editedDataUrl: dataUrl } }));
+              setEditing(null);
+            }}
+          />
+        </Suspense>
+      )}
+    </>
   );
 }
 

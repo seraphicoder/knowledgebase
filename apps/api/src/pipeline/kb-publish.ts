@@ -1,12 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { writeAudit } from '../lib/audit.js';
+import { log } from '../lib/logger.js';
 
 // Publishing an approved extraction into the knowledge base: render a markdown
-// article body, copy the already-computed embedding (no new AI call), and create
-// a kb_articles row linked back to the extraction.
+// article body, copy the already-computed embedding (no new AI call), create a
+// kb_articles row linked back to the extraction, and attach the reviewer's
+// curated set of images (original or edited).
 
 export interface ExtractionForPublish {
   id: string;
+  thread_id: string | null;
   question: string | null;
   answer: string | null;
   title: string | null;
@@ -15,6 +19,15 @@ export interface ExtractionForPublish {
   caveats: string | null;
   embedding: string | null; // pgvector text form, copied straight through
 }
+
+// Reviewer's per-image choice at publish time. Only included images are sent.
+export interface PublishImage {
+  sourceAttachmentId: string;
+  /** Edited/cropped/annotated version as a data URL; absent = use the original. */
+  editedDataUrl?: string | null;
+}
+
+const BUCKET = 'attachments';
 
 /** Render an extraction's Q&A into a markdown article body. */
 export function buildArticleBody(e: {
@@ -47,6 +60,7 @@ export async function publishExtraction(
   orgId: string,
   userId: string,
   e: ExtractionForPublish,
+  images?: PublishImage[],
 ): Promise<string> {
   const { data: article, error: insErr } = await db
     .from('kb_articles')
@@ -67,9 +81,95 @@ export async function publishExtraction(
 
   await db.from('extractions').update({ status: 'published' }).eq('id', e.id);
 
+  const articleId = article.id as string;
+  const imageCount = await attachArticleImages(db, orgId, articleId, e.thread_id, images);
+
   await writeAudit({
     orgId, userId, action: 'article.published', resource: 'kb_articles',
-    resourceId: article.id as string, metadata: { extractionId: e.id },
+    resourceId: articleId, metadata: { extractionId: e.id, images: imageCount },
   });
-  return article.id as string;
+  return articleId;
+}
+
+/**
+ * Attach the reviewer's curated images to a published article. Included images
+ * either copy a source attachment's bytes (by reference, same storage_path) or
+ * upload an edited version. If `images` is omitted, defaults to ALL of the source
+ * thread's images (preserves "show everything" when the reviewer didn't curate).
+ */
+export async function attachArticleImages(
+  db: SupabaseClient,
+  orgId: string,
+  articleId: string,
+  threadId: string | null,
+  images?: PublishImage[],
+): Promise<number> {
+  if (!threadId) return 0;
+
+  const { data: atts } = await db
+    .from('attachments')
+    .select('id, storage_path, content_type')
+    .eq('org_id', orgId)
+    .eq('thread_id', threadId);
+  const byId = new Map((atts ?? []).map((a) => [a.id as string, a]));
+
+  // No explicit curation -> include all source images unedited.
+  const chosen: PublishImage[] =
+    images ?? (atts ?? []).map((a) => ({ sourceAttachmentId: a.id as string }));
+
+  let position = 0;
+  let count = 0;
+  for (const img of chosen) {
+    const src = byId.get(img.sourceAttachmentId);
+    if (!src && !img.editedDataUrl) continue; // unknown source, nothing to store
+
+    let storagePath: string;
+    let contentType = (src?.content_type as string | null) ?? 'image/png';
+    let edited = false;
+
+    if (img.editedDataUrl) {
+      const parsed = parseDataUrl(img.editedDataUrl);
+      if (!parsed) continue;
+      contentType = parsed.contentType;
+      storagePath = `${orgId}/articles/${articleId}/${randomUUID()}.${extFor(contentType)}`;
+      const up = await db.storage.from(BUCKET).upload(storagePath, parsed.buffer, { contentType, upsert: false });
+      if (up.error) {
+        log.error('article image upload failed', { error: up.error.message });
+        continue;
+      }
+      edited = true;
+    } else {
+      storagePath = src!.storage_path as string;
+    }
+
+    const { error } = await db.from('kb_article_images').insert({
+      org_id: orgId,
+      kb_article_id: articleId,
+      source_attachment_id: src?.id ?? null,
+      storage_path: storagePath,
+      content_type: contentType,
+      edited,
+      position: position++,
+    });
+    if (!error) count++;
+    else log.error('kb_article_images insert failed', { error: error.message });
+  }
+  return count;
+}
+
+function parseDataUrl(s: string): { contentType: string; buffer: Buffer } | null {
+  const m = /^data:([^;]+);base64,(.+)$/s.exec(s);
+  if (!m) return null;
+  try {
+    return { contentType: m[1]!, buffer: Buffer.from(m[2]!, 'base64') };
+  } catch {
+    return null;
+  }
+}
+
+function extFor(contentType: string): string {
+  if (contentType.includes('png')) return 'png';
+  if (contentType.includes('jpeg') || contentType.includes('jpg')) return 'jpg';
+  if (contentType.includes('webp')) return 'webp';
+  return 'img';
 }

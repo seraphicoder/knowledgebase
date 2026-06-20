@@ -328,6 +328,34 @@ Each returned entry becomes its own `extractions` row (with its own embedding) f
 | email | text | |
 | role | enum | `admin`, `reviewer`, `sme`, `viewer` |
 
+### `attachments`
+Image attachments captured from tickets/emails. Bytes live in a private Supabase Storage bucket; this table holds metadata + the storage path. Served to the UI via short-lived signed URLs.
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| org_id | uuid | FK |
+| thread_id | uuid | FK → email_threads (cascade) |
+| filename | text | |
+| content_type | text | image/* only for now |
+| size | int | bytes |
+| storage_path | text | path in the `attachments` bucket |
+| inline | boolean | inline (cid) vs regular attachment |
+| created_at | timestamptz | |
+
+### `kb_article_images`
+A published article's curated images, chosen at review time (per-article, since one thread can yield several drafts). Each points at a source attachment's bytes or an edited/cropped/annotated version.
+| column | type | notes |
+|---|---|---|
+| id | uuid | PK |
+| org_id | uuid | FK |
+| kb_article_id | uuid | FK → kb_articles (cascade) |
+| source_attachment_id | uuid | FK → attachments (null on delete) |
+| storage_path | text | original or edited object in the `attachments` bucket |
+| content_type | text | |
+| edited | boolean | true if cropped/annotated in the review editor |
+| position | int | display order |
+| created_at | timestamptz | |
+
 ### `domain_facts`
 Org-authored grounding facts/rules injected into the extraction prompt so the AI uses the customer's truth instead of its assumptions (see [AI Extraction Layer](#ai-extraction-layer-claude-api)).
 | column | type | notes |

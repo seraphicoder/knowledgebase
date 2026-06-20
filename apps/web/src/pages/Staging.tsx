@@ -12,6 +12,7 @@ import {
   type PipelineStats,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
+import { ThreadImages } from '../components/ThreadImages';
 
 // Milestone 1 Staging Review page. Approving a thread here is the only way its
 // approval_status changes. With no pipeline runner yet, an approved thread just
@@ -359,6 +360,7 @@ function PreviewDrawer({ thread, onClose }: { thread: ThreadDetail; onClose: () 
         <pre className="whitespace-pre-wrap rounded bg-gray-50 p-3 text-sm text-gray-800">
           {thread.raw_content || '(empty)'}
         </pre>
+        <ThreadImages threadId={thread.id} />
       </div>
     </div>
   );
