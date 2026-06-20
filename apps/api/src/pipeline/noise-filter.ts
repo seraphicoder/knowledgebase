@@ -65,10 +65,10 @@ export function stripHtmlArtifacts(text: string): string {
     .replace(/&#(\d+);/g, (_, n: string) => codePoint(Number(n)))
     .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => codePoint(parseInt(h, 16)))
     .replace(/&amp;/gi, '&');
-  // Normalize unicode spaces (NBSP etc.) to plain spaces; drop zero-width chars.
-  return t
-    .replace(/[     ]/g, ' ')
-    .replace(/[​‌‍﻿]/g, '');
+  // Normalize ALL unicode space separators (NBSP, narrow NBSP, etc.) to a plain
+  // space, and drop zero-width / format characters. \p{Zs} and \p{Cf} keep this
+  // ASCII-only in source while covering every variant.
+  return t.replace(/\p{Zs}/gu, ' ').replace(/\p{Cf}/gu, '');
 }
 
 function codePoint(n: number): string {
@@ -130,7 +130,7 @@ export function isAutoReply(message: RawMessage, metadata: Record<string, unknow
 function collapseWhitespace(text: string): string {
   return text
     .replace(/[ \t]+/g, ' ')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]+\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n') // trim trailing spaces FIRST so blank lines are truly empty
+    .replace(/\n{3,}/g, '\n\n') // THEN collapse runs of blank lines
     .trim();
 }

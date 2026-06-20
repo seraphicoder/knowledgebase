@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   cleanBody,
+  stripHtmlArtifacts,
   stripSignature,
   removeQuotedReplies,
   stripDisclaimers,
@@ -51,6 +52,26 @@ describe('noise-filter', () => {
   it('detects auto-reply via the X-Auto-Response-Suppress header signal', () => {
     const msg: RawMessage = { author: 'x', body: 'hello', timestamp: new Date() };
     expect(isAutoReply(msg, { autoResponseSuppress: 'All' })).toBe(true);
+  });
+
+  it('decodes HTML entities and strips tags', () => {
+    const out = stripHtmlArtifacts('Second &amp; third &lt;tag&gt;.<br>Fourth<div>Fifth</div>');
+    expect(out).toContain('Second & third <tag>.');
+    expect(out).toContain('Fourth');
+    expect(out).toContain('Fifth');
+    expect(out).not.toContain('&amp;');
+    expect(out).not.toContain('<br>');
+  });
+
+  it('clears &nbsp; and non-breaking-space white lines', () => {
+    const nbsp = String.fromCharCode(160);
+    const raw = `First line.${nbsp}${nbsp}\n&nbsp;\n&nbsp;\nSecond line.`;
+    const out = cleanBody(raw);
+    expect(out).toContain('First line.');
+    expect(out).toContain('Second line.');
+    expect(out).not.toContain('&nbsp;');
+    expect(out).not.toContain(nbsp); // no raw non-breaking spaces left
+    expect(out).not.toMatch(/\n\s*\n\s*\n/); // no 3+ blank-ish lines in a row
   });
 
   it('leaves clean content essentially intact', () => {

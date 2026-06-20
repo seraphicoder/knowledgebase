@@ -17,6 +17,43 @@ import { supabase } from '../lib/supabase';
 // approval_status changes. With no pipeline runner yet, an approved thread just
 // sits at approval_status='approved', processing_status='not_started' — correct.
 
+type SortKey = 'subject' | 'source_id' | 'participants' | 'message_count' | 'date_range_start';
+type SortDir = 'asc' | 'desc';
+
+function ts(d: string | null): number {
+  return d ? new Date(d).getTime() : 0;
+}
+
+// Match a thread against a lowercased query across every displayed column.
+function matchesSearch(t: StagedThread, q: string): boolean {
+  const haystack = [
+    t.subject ?? '',
+    t.source_id,
+    t.participants.join(' '),
+    String(t.message_count),
+    fmtDate(t.date_range_start),
+    t.date_range_start ?? '',
+  ]
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(q);
+}
+
+function compareThreads(a: StagedThread, b: StagedThread, key: SortKey): number {
+  switch (key) {
+    case 'subject':
+      return (a.subject ?? '').localeCompare(b.subject ?? '');
+    case 'source_id':
+      return a.source_id.localeCompare(b.source_id);
+    case 'participants':
+      return a.participants.join(', ').localeCompare(b.participants.join(', '));
+    case 'message_count':
+      return a.message_count - b.message_count;
+    case 'date_range_start':
+      return ts(a.date_range_start) - ts(b.date_range_start);
+  }
+}
+
 export function Staging() {
   const [threads, setThreads] = useState<StagedThread[]>([]);
   const [total, setTotal] = useState(0);
@@ -28,6 +65,9 @@ export function Staging() {
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<PipelineStats | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>('date_range_start');
+  const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [search, setSearch] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -48,9 +88,18 @@ export function Staging() {
     void load();
   }, [load]);
 
-  const allSelected = threads.length > 0 && selected.size === threads.length;
+  // Instant client-side search across all displayed columns, then sort.
+  const sortedThreads = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const filtered = q ? threads.filter((t) => matchesSearch(t, q)) : threads;
+    const dir = sortDir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => dir * compareThreads(a, b, sortKey));
+  }, [threads, search, sortKey, sortDir]);
+
+  // Select-all operates on the currently visible (searched) rows.
+  const allSelected = sortedThreads.length > 0 && sortedThreads.every((t) => selected.has(t.id));
   const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(threads.map((t) => t.id)));
+    setSelected(allSelected ? new Set() : new Set(sortedThreads.map((t) => t.id)));
   const toggleOne = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -59,6 +108,16 @@ export function Staging() {
     });
 
   const selectedIds = useMemo(() => [...selected], [selected]);
+
+  function onSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      // Dates feel natural newest-first; text/number ascending.
+      setSortDir(key === 'date_range_start' ? 'desc' : 'asc');
+    }
+  }
 
   async function onApprove() {
     if (selectedIds.length === 0) return;
@@ -158,6 +217,22 @@ export function Staging() {
 
       <Filters filters={filters} onChange={setFilters} onRefresh={load} />
 
+      {/* Instant search across all columns of the loaded threads. */}
+      <div className="mb-3 flex items-center gap-2">
+        <input
+          type="search"
+          placeholder="Search all columns (subject, source, participants, date…)"
+          className="w-full max-w-md rounded border border-gray-300 px-3 py-1.5 text-sm"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        {search && (
+          <span className="text-xs text-gray-500">
+            {sortedThreads.length} match{sortedThreads.length === 1 ? '' : 'es'}
+          </span>
+        )}
+      </div>
+
       {error && (
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
           {error}
@@ -188,20 +263,22 @@ export function Staging() {
               <th className="w-10 px-3 py-2">
                 <input type="checkbox" checked={allSelected} onChange={toggleAll} />
               </th>
-              <th className="px-3 py-2">Subject</th>
-              <th className="px-3 py-2">Source</th>
-              <th className="px-3 py-2">Participants</th>
-              <th className="px-3 py-2">Msgs</th>
-              <th className="px-3 py-2">Date</th>
+              <SortHeader label="Subject" col="subject" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <SortHeader label="Source" col="source_id" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <SortHeader label="Participants" col="participants" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <SortHeader label="Msgs" col="message_count" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
+              <SortHeader label="Date" col="date_range_start" sortKey={sortKey} sortDir={sortDir} onSort={onSort} />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
-            ) : threads.length === 0 ? (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">No staged threads.</td></tr>
+            ) : sortedThreads.length === 0 ? (
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">
+                {search ? 'No threads match your search.' : 'No staged threads.'}
+              </td></tr>
             ) : (
-              threads.map((t) => (
+              sortedThreads.map((t) => (
                 <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2">
                     <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} />
@@ -238,14 +315,6 @@ function Filters({
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
-      <label className="text-sm">
-        <span className="mb-1 block text-gray-500">Search subject</span>
-        <input
-          className="rounded border border-gray-300 px-2 py-1"
-          value={filters.q ?? ''}
-          onChange={(e) => onChange({ ...filters, q: e.target.value || undefined })}
-        />
-      </label>
       <label className="text-sm">
         <span className="mb-1 block text-gray-500">From</span>
         <input
@@ -290,6 +359,33 @@ function PreviewDrawer({ thread, onClose }: { thread: ThreadDetail; onClose: () 
         </pre>
       </div>
     </div>
+  );
+}
+
+function SortHeader({
+  label,
+  col,
+  sortKey,
+  sortDir,
+  onSort,
+}: {
+  label: string;
+  col: SortKey;
+  sortKey: SortKey;
+  sortDir: SortDir;
+  onSort: (k: SortKey) => void;
+}) {
+  const active = sortKey === col;
+  return (
+    <th className="px-3 py-2">
+      <button
+        onClick={() => onSort(col)}
+        className={`flex items-center gap-1 font-medium hover:text-gray-900 ${active ? 'text-gray-900' : ''}`}
+      >
+        {label}
+        <span className="text-xs">{active ? (sortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+      </button>
+    </th>
   );
 }
 
