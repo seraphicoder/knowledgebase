@@ -86,7 +86,7 @@ export function isAutoReply(message: RawMessage, metadata: Record<string, unknow
   if (metadata.autoResponseSuppress) return true;
   // Some IMAP messages carry the subject into the body's first line; also guard
   // on body content for safety.
-  return OOO_SUBJECT.test(message.body.slice(0, 200));
+  return OOO_SUBJECT.test((message.body ?? '').slice(0, 200));
 }
 
 function collapseWhitespace(text: string): string {

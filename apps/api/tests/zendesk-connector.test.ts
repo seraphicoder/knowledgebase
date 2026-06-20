@@ -50,12 +50,12 @@ describe('zendesk-connector', () => {
     expect(c.metadata.tags).toEqual(['login', 'auth']);
   });
 
-  it('requests newest-first (sort=-created_at)', async () => {
+  it('requests newest-first (sort_by=created_at&sort_order=desc)', async () => {
     let sawSort = false;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/api/v2/tickets.json')) {
-        if (url.includes('sort=-created_at')) sawSort = true;
+        if (url.includes('sort_by=created_at') && url.includes('sort_order=desc')) sawSort = true;
         return jsonResponse(cursorPage([ticket(1)], null, false));
       }
       if (url.includes('/comments.json')) return jsonResponse({ comments: [], next_page: null });

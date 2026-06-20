@@ -21,8 +21,10 @@ interface ZendeskTicket {
 interface ZendeskComment {
   id: number;
   author_id: number;
-  plain_body: string;
-  html_body: string;
+  // Optional in practice: voice/system comments can omit the text bodies.
+  plain_body?: string;
+  body?: string;
+  html_body?: string;
   created_at: string;
 }
 
@@ -43,7 +45,15 @@ export class ZendeskConnector implements Connector {
   private readonly userEmailCache = new Map<number, string>();
 
   constructor(private readonly config: ZendeskConfig) {
-    this.baseUrl = `https://${config.subdomain}.zendesk.com`;
+    // Accept either the bare subdomain ("acme") or a pasted full host/URL
+    // ("acme.zendesk.com", "https://acme.zendesk.com/") and normalize to the bare
+    // subdomain so we don't build "acme.zendesk.com.zendesk.com".
+    const sub = config.subdomain
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/.*$/, '')
+      .replace(/\.zendesk\.com$/i, '');
+    this.baseUrl = `https://${sub}.zendesk.com`;
     // HTTP Basic with "{email}/token:{api_token}".
     const creds = `${config.email}/token:${config.apiToken}`;
     this.authHeader = `Basic ${Buffer.from(creds).toString('base64')}`;
@@ -66,8 +76,8 @@ export class ZendeskConnector implements Connector {
     const limit = options?.limit;
     const { tickets, nextCursor } = await this.fetchTicketPages(cursor, limit);
 
-    // Tickets already arrive newest-first (sort=-created_at). Fetch comments in
-    // that same order so the resulting conversations stay newest-first.
+    // Tickets already arrive newest-first. Fetch comments in that same order so
+    // the resulting conversations stay newest-first.
     const conversations: RawConversation[] = [];
     for (const ticket of tickets) {
       const comments = await this.fetchComments(ticket.id);
@@ -82,11 +92,9 @@ export class ZendeskConnector implements Connector {
 
   // Cursor pagination on the tickets list endpoint, newest-first. We size each
   // page to the exact remaining need so the after_cursor always aligns to the
-  // tickets we actually consumed — never skipping a partial page.
-  //
-  // NOTE: the descending sort param (`sort=-created_at`) should be validated
-  // against the live account; some Zendesk list endpoints expect
-  // `sort_by`/`sort_order` instead. Adjust here if the API rejects it.
+  // tickets we actually consumed — never skipping a partial page. Ordering uses
+  // sort_by=created_at&sort_order=desc (verified against the live Tickets
+  // endpoint, which rejects the `sort=-created_at` shorthand with a 400).
   private async fetchTicketPages(
     cursor: string | null,
     limit?: number,
@@ -109,7 +117,9 @@ export class ZendeskConnector implements Connector {
   }
 
   private ticketsPagePath(size: number, after: string | null): string {
-    const parts = [`page[size]=${size}`, 'sort=-created_at'];
+    // Newest-first. The Tickets endpoint uses sort_by/sort_order — NOT the
+    // `sort=-created_at` shorthand, which it rejects with a 400.
+    const parts = [`page[size]=${size}`, 'sort_by=created_at', 'sort_order=desc'];
     if (after) parts.push(`page[after]=${encodeURIComponent(after)}`);
     return `/api/v2/tickets.json?${parts.join('&')}`;
   }
@@ -133,7 +143,9 @@ export class ZendeskConnector implements Connector {
   ): Promise<RawConversation> {
     const messages: RawMessage[] = comments.map((c) => ({
       author: `user:${c.author_id}`, // resolved lazily below for participants
-      body: c.plain_body, // plain_body, never html_body
+      // Prefer plain_body (never html_body). Some comments (voice/system) carry
+      // no plain_body, so fall back to body, then empty string — never undefined.
+      body: c.plain_body ?? c.body ?? '',
       timestamp: new Date(c.created_at),
     }));
 
