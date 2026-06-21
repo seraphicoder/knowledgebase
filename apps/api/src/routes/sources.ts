@@ -225,11 +225,28 @@ sources.post('/sources/:id/test', async (c) => {
 const running = new Set<string>();
 const ingestSchema = z.object({ limit: z.coerce.number().int().positive().max(500).optional() });
 
+// In-app pulls are bounded per source so a run is short and predictable (click
+// again to walk further back). Bulk backfills use the CLI with no limit.
+const DEFAULT_INGEST_LIMIT = 250;
+// Hard cap per source so a hung/stalled connector can't wedge the run (and the
+// in-memory `running` flag) forever — the run always settles and clears the flag.
+const PER_SOURCE_TIMEOUT_MS = 5 * 60_000;
+
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e instanceof Error ? e : new Error(String(e))); },
+    );
+  });
+}
+
 sources.post('/sources/ingest', async (c) => {
   const { orgId, userId, role } = c.get('auth');
   if (!requireAdmin(role)) return c.json({ error: 'Admin access required' }, 403);
   const parsed = ingestSchema.safeParse(await c.req.json().catch(() => ({})));
-  const limit = parsed.success ? parsed.data.limit : undefined;
+  const limit = (parsed.success && parsed.data.limit) || DEFAULT_INGEST_LIMIT;
   if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
 
   const db = getServiceClient();
@@ -253,7 +270,7 @@ sources.post('/sources/:id/ingest', async (c) => {
   const id = c.req.param('id');
   if (!id) return c.json({ error: 'Missing source id' }, 400);
   const parsed = ingestSchema.safeParse(await c.req.json().catch(() => ({})));
-  const limit = parsed.success ? parsed.data.limit : undefined;
+  const limit = (parsed.success && parsed.data.limit) || DEFAULT_INGEST_LIMIT;
   if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
 
   const db = getServiceClient();
@@ -295,7 +312,7 @@ async function runIngest(orgId: string, userId: string, list: IngestionSourceRow
   const perSource: Record<string, unknown>[] = [];
   for (const src of list) {
     try {
-      const r = await ingestSource(src, { limit });
+      const r = await withTimeout(ingestSource(src, { limit }), PER_SOURCE_TIMEOUT_MS, `ingest ${src.type}`);
       inserted += r.inserted;
       duplicates += r.duplicatesSkipped;
       perSource.push({ id: src.id, type: src.type, inserted: r.inserted, duplicates: r.duplicatesSkipped, backfillComplete: r.backfillComplete });
