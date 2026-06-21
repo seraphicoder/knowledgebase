@@ -74,8 +74,12 @@ export function Staging() {
 
   function onSort(key: SortKey) {
     setFilters((f) => {
-      if (key === sortKey) {
-        return { ...f, dir: sortDir === 'asc' ? 'desc' : 'asc' };
+      // Compare against the actual filter (not the derived default) so the first
+      // click on the default column still pins `sort` instead of only toggling.
+      const curKey = f.sort ?? 'date_range_start';
+      const curDir = f.dir ?? 'desc';
+      if (key === curKey) {
+        return { ...f, sort: key, dir: curDir === 'asc' ? 'desc' : 'asc' };
       }
       // Dates feel natural newest-first; text/number ascending.
       return { ...f, sort: key, dir: key === 'date_range_start' ? 'desc' : 'asc' };
