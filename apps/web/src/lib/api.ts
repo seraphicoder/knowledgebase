@@ -15,6 +15,7 @@ export interface StagedThread {
   date_range_start: string | null;
   date_range_end: string | null;
   ingested_at: string;
+  attachment_count?: number;
 }
 
 export interface ThreadDetail {
@@ -231,7 +232,20 @@ export function getExtractionSimilar(id: string): Promise<{ similar: SimilarArti
   return request(`/api/extractions/${id}/similar`);
 }
 
-export function mergePreview(extractionId: string, articleId: string): Promise<{ merged: { title: string; body: string } }> {
+export interface MergeCandidate {
+  source: 'article' | 'ticket';
+  url: string | null;
+  filename: string | null;
+  sourceAttachmentId: string | null;
+  storagePath: string | null;
+  contentType: string | null;
+  edited: boolean;
+}
+
+export function mergePreview(
+  extractionId: string,
+  articleId: string,
+): Promise<{ merged: { title: string; body: string }; images: MergeCandidate[] }> {
   return request(`/api/extractions/${extractionId}/merge-preview`, {
     method: 'POST',
     body: JSON.stringify({ articleId }),
@@ -240,7 +254,7 @@ export function mergePreview(extractionId: string, articleId: string): Promise<{
 
 export function mergeApply(
   extractionId: string,
-  body: { articleId: string; title: string; body: string },
+  body: { articleId: string; title: string; body: string; images?: PublishImageInput[] },
 ): Promise<{ ok: boolean }> {
   return request(`/api/extractions/${extractionId}/merge`, { method: 'POST', body: JSON.stringify(body) });
 }

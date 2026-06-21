@@ -10,6 +10,7 @@ import {
   getExtractionSimilar,
   mergePreview,
   mergeApply,
+  type MergeCandidate,
   type Extraction,
   type ExtractionSourceThread,
   type ExtractionEdit,
@@ -179,14 +180,16 @@ function ReviewDrawer({
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [similar, setSimilar] = useState<SimilarArticle[]>([]);
   const [merging, setMerging] = useState<{ articleId: string; title: string; body: string } | null>(null);
+  const [mergeImages, setMergeImages] = useState<(MergeCandidate & { included: boolean; key: string })[]>([]);
   const [mergeBusy, setMergeBusy] = useState(false);
 
   async function startMerge(articleId: string) {
     setMergeBusy(true);
     setError(null);
     try {
-      const { merged } = await mergePreview(id, articleId);
+      const { merged, images } = await mergePreview(id, articleId);
       setMerging({ articleId, title: merged.title, body: merged.body });
+      setMergeImages(images.map((im, i) => ({ ...im, included: true, key: `${im.source}-${im.storagePath ?? im.sourceAttachmentId ?? i}` })));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not build a merge preview');
     } finally {
@@ -198,8 +201,15 @@ function ReviewDrawer({
     if (!merging) return;
     setMergeBusy(true);
     setError(null);
+    const images: PublishImageInput[] = mergeImages
+      .filter((m) => m.included)
+      .map((m) =>
+        m.storagePath
+          ? { storagePath: m.storagePath, contentType: m.contentType, edited: m.edited }
+          : { sourceAttachmentId: m.sourceAttachmentId ?? undefined },
+      );
     try {
-      await mergeApply(id, { articleId: merging.articleId, title: merging.title, body: merging.body });
+      await mergeApply(id, { articleId: merging.articleId, title: merging.title, body: merging.body, images });
       setMerging(null);
       onResolved();
     } catch (e) {
@@ -542,11 +552,41 @@ function ReviewDrawer({
               <span className="mb-1 block font-medium text-gray-600">Body (merged)</span>
               <textarea
                 className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                rows={14}
+                rows={12}
                 value={merging.body}
                 onChange={(e) => setMerging((m) => (m ? { ...m, body: e.target.value } : m))}
               />
             </label>
+
+            {mergeImages.length > 0 && (
+              <div className="mb-3">
+                <p className="mb-1 text-sm font-medium text-gray-600">
+                  Images ({mergeImages.filter((m) => m.included).length}/{mergeImages.length} included)
+                </p>
+                <p className="mb-2 text-xs text-gray-400">Article images and the ticket's images combined — uncheck any you don't want on the merged article.</p>
+                <div className="flex flex-wrap gap-3">
+                  {mergeImages.map((m) => (
+                    <div key={m.key} className="w-24">
+                      <div className={`relative rounded border ${m.included ? 'border-emerald-400' : 'border-gray-200 opacity-50'}`}>
+                        {m.url && <img src={m.url} alt={m.filename ?? ''} className="h-20 w-full rounded object-cover" />}
+                        <span className={`absolute left-1 top-1 rounded px-1 text-[10px] text-white ${m.source === 'article' ? 'bg-gray-600' : 'bg-blue-600'}`}>
+                          {m.source}
+                        </span>
+                      </div>
+                      <label className="mt-1 flex items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={m.included}
+                          onChange={(e) => setMergeImages((list) => list.map((x) => (x.key === m.key ? { ...x, included: e.target.checked } : x)))}
+                        />
+                        include
+                      </label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="flex gap-2">
               <button onClick={() => void applyMerge()} disabled={mergeBusy} className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
                 {mergeBusy ? 'Applying…' : 'Apply merge'}

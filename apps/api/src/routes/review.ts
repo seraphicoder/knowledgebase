@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
-import { publishExtraction, type ExtractionForPublish, type PublishImage } from '../pipeline/kb-publish.js';
+import { publishExtraction, attachArticleImages, type ExtractionForPublish, type PublishImage } from '../pipeline/kb-publish.js';
 import { mergeArticle } from '../pipeline/kb-merge.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
 
@@ -161,7 +161,7 @@ review.post('/extractions/:id/merge-preview', async (c: Context<{ Variables: Aut
   const db = getServiceClient();
 
   const [{ data: draft }, { data: article }] = await Promise.all([
-    db.from('extractions').select('title, question, answer, caveats').eq('org_id', orgId).eq('id', id).eq('status', 'pending_review').single(),
+    db.from('extractions').select('title, question, answer, caveats, thread_id').eq('org_id', orgId).eq('id', id).eq('status', 'pending_review').single(),
     db.from('kb_articles').select('id, title, body').eq('org_id', orgId).eq('id', parsed.data.articleId).single(),
   ]);
   if (!draft) return c.json({ error: 'No pending extraction with that id' }, 404);
@@ -172,7 +172,45 @@ review.post('/extractions/:id/merge-preview', async (c: Context<{ Variables: Aut
       { title: article.title as string, body: article.body as string },
       { title: draft.title as string | null, question: draft.question as string | null, answer: draft.answer as string | null, caveats: draft.caveats as string | null },
     );
-    return c.json({ merged });
+
+    // Candidate images to combine: the article's current images + the ticket's.
+    const [{ data: artImgs }, { data: tixImgs }] = await Promise.all([
+      db.from('kb_article_images').select('storage_path, content_type, edited, source_attachment_id').eq('org_id', orgId).eq('kb_article_id', parsed.data.articleId).order('position', { ascending: true }),
+      draft.thread_id
+        ? db.from('attachments').select('id, filename, content_type, storage_path').eq('org_id', orgId).eq('thread_id', draft.thread_id as string)
+        : Promise.resolve({ data: [] as { id: string; filename: string | null; content_type: string | null; storage_path: string }[] }),
+    ]);
+    const allPaths = [
+      ...(artImgs ?? []).map((a) => a.storage_path as string),
+      ...(tixImgs ?? []).map((t) => t.storage_path as string),
+    ];
+    const urlByPath = new Map<string, string>();
+    if (allPaths.length > 0) {
+      const { data: signed } = await db.storage.from('attachments').createSignedUrls(allPaths, 3600);
+      for (const s of signed ?? []) if (s.path && s.signedUrl) urlByPath.set(s.path, s.signedUrl);
+    }
+    const images = [
+      ...(artImgs ?? []).map((a) => ({
+        source: 'article' as const,
+        url: urlByPath.get(a.storage_path as string) ?? null,
+        filename: null as string | null,
+        sourceAttachmentId: (a.source_attachment_id as string | null) ?? null,
+        storagePath: a.storage_path as string,
+        contentType: (a.content_type as string | null) ?? null,
+        edited: Boolean(a.edited),
+      })),
+      ...(tixImgs ?? []).map((t) => ({
+        source: 'ticket' as const,
+        url: urlByPath.get(t.storage_path as string) ?? null,
+        filename: (t.filename as string | null) ?? null,
+        sourceAttachmentId: t.id as string,
+        storagePath: null as string | null,
+        contentType: (t.content_type as string | null) ?? null,
+        edited: false,
+      })),
+    ];
+
+    return c.json({ merged, images });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : 'Merge failed' }, 500);
   }
@@ -181,10 +219,17 @@ review.post('/extractions/:id/merge-preview', async (c: Context<{ Variables: Aut
 // ─── POST /api/extractions/:id/merge — apply the merge ──────
 // Updates the existing article (re-embedded, version bumped) and marks the draft
 // 'merged' so it leaves the queue without publishing a duplicate.
+const mergeImageSchema = z.object({
+  sourceAttachmentId: z.string().optional(),
+  storagePath: z.string().optional(),
+  contentType: z.string().nullable().optional(),
+  edited: z.boolean().optional(),
+});
 const mergeApplySchema = z.object({
   articleId: z.string().uuid(),
   title: z.string().min(1),
   body: z.string().min(1),
+  images: z.array(mergeImageSchema).optional(),
 });
 
 review.post('/extractions/:id/merge', async (c: Context<{ Variables: AuthVars }>) => {
@@ -196,7 +241,7 @@ review.post('/extractions/:id/merge', async (c: Context<{ Variables: AuthVars }>
   if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, 400);
   const db = getServiceClient();
 
-  const { data: draft } = await db.from('extractions').select('id').eq('org_id', orgId).eq('id', id).eq('status', 'pending_review').single();
+  const { data: draft } = await db.from('extractions').select('id, thread_id').eq('org_id', orgId).eq('id', id).eq('status', 'pending_review').single();
   if (!draft) return c.json({ error: 'No pending extraction with that id' }, 404);
   const { data: article } = await db.from('kb_articles').select('id, version').eq('org_id', orgId).eq('id', parsed.data.articleId).single();
   if (!article) return c.json({ error: 'Article not found' }, 404);
@@ -217,6 +262,14 @@ review.post('/extractions/:id/merge', async (c: Context<{ Variables: AuthVars }>
     .eq('org_id', orgId)
     .eq('id', parsed.data.articleId);
   if (upErr) return c.json({ error: upErr.message }, 500);
+
+  // Replace the article's images with the merged set (article's kept + ticket's
+  // brought in, per the reviewer's curation). Reuses existing storage objects;
+  // ticket images are copied by reference from the draft's thread.
+  if (parsed.data.images) {
+    await db.from('kb_article_images').delete().eq('org_id', orgId).eq('kb_article_id', parsed.data.articleId);
+    await attachArticleImages(db, orgId, parsed.data.articleId, (draft.thread_id as string | null) ?? null, parsed.data.images);
+  }
 
   await db.from('extractions').update({ status: 'merged', reviewed_by: userId, reviewed_at: new Date().toISOString() }).eq('id', id);
 

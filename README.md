@@ -131,8 +131,9 @@ multi-Q&A: one thread can yield several drafts, one per distinct resolved issue)
 Milestone 3 review queue (humans qualify AI-drafted extractions, then **Approve &
 Publish**), and Milestone 4 KB output. At review time, a draft is checked for **near-duplicate
 published articles** (flagged in the queue and inside the draft, with links); a
-reviewer can **AI-merge** the draft into an existing article (Claude unifies them,
-human edits/approves, the article re-versions and the draft is marked `merged`)
+reviewer can **AI-merge** the draft into an existing article (Claude unifies the
+text, the reviewer curates the combined image set — the article's images plus the
+ticket's — then approves; the article re-versions and the draft is marked `merged`)
 instead of creating a duplicate. Published articles support **comments** and a **"needs update" flag** (flagged
 articles are badged in the list and on the article; managers clear the flag, and
 merging/editing auto-clears it). They're **searchable in plain

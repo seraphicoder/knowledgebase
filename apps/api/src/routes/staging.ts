@@ -45,8 +45,34 @@ staging.get('/threads/staged', async (c) => {
 
   const { data, error, count } = await query;
   if (error) return c.json({ error: error.message }, 500);
-  return c.json({ threads: data ?? [], total: count ?? 0, limit, offset });
+
+  // Flag which threads carry attachments (e.g. photos) so the list can badge
+  // them without loading any image bytes. One scoped query over the page's ids.
+  const ids = (data ?? []).map((t) => t.id as string);
+  const withCounts = await annotateAttachmentCounts(db, orgId, ids, data ?? []);
+  return c.json({ threads: withCounts, total: count ?? 0, limit, offset });
 });
+
+// Adds `attachment_count` to each thread row using a single org-scoped query.
+async function annotateAttachmentCounts(
+  db: ReturnType<typeof getServiceClient>,
+  orgId: string,
+  threadIds: string[],
+  rows: Record<string, unknown>[],
+): Promise<Record<string, unknown>[]> {
+  if (threadIds.length === 0) return rows;
+  const { data: atts } = await db
+    .from('attachments')
+    .select('thread_id')
+    .eq('org_id', orgId)
+    .in('thread_id', threadIds);
+  const counts = new Map<string, number>();
+  for (const a of atts ?? []) {
+    const tid = a.thread_id as string;
+    counts.set(tid, (counts.get(tid) ?? 0) + 1);
+  }
+  return rows.map((r) => ({ ...r, attachment_count: counts.get(r.id as string) ?? 0 }));
+}
 
 // ─── GET /api/threads/approved ──────────────────────────────
 // Approved threads leave the staging list, so this is where you see what's been

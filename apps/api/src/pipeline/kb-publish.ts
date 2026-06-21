@@ -27,7 +27,7 @@ export interface PublishImage {
   editedDataUrl?: string | null;
   /** Reuse an already-stored object (preserved/edited from a prior publish). */
   storagePath?: string;
-  contentType?: string;
+  contentType?: string | null;
   edited?: boolean;
 }
 

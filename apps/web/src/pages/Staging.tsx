@@ -295,6 +295,15 @@ export function Staging() {
                     <button onClick={() => openPreview(t.id)} className="text-left font-medium text-blue-700 hover:underline">
                       {t.subject || '(no subject)'}
                     </button>
+                    {!!t.attachment_count && (
+                      <span
+                        className="ml-2 inline-flex items-center gap-0.5 align-middle text-xs text-gray-400"
+                        title={`${t.attachment_count} attachment${t.attachment_count === 1 ? '' : 's'} (e.g. photos)`}
+                      >
+                        <PhotoIcon />
+                        {t.attachment_count}
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-gray-600">{t.source_id.slice(0, 8)}…</td>
                   <td className="px-3 py-2 text-gray-600">{t.participants.slice(0, 2).join(', ')}{t.participants.length > 2 ? '…' : ''}</td>
@@ -403,4 +412,16 @@ function SortHeader({
 function fmtDate(iso: string | null): string {
   if (!iso) return '—';
   return new Date(iso).toLocaleDateString();
+}
+
+function PhotoIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="currentColor" className="h-3.5 w-3.5" aria-hidden="true">
+      <path
+        fillRule="evenodd"
+        d="M1 5.25A2.25 2.25 0 0 1 3.25 3h13.5A2.25 2.25 0 0 1 19 5.25v9.5A2.25 2.25 0 0 1 16.75 17H3.25A2.25 2.25 0 0 1 1 14.75v-9.5Zm1.5 5.81v3.69c0 .414.336.75.75.75h13.5a.75.75 0 0 0 .75-.75v-2.69l-2.22-2.219a.75.75 0 0 0-1.06 0l-1.91 1.909.47.47a.75.75 0 1 1-1.06 1.06L6.53 8.091a.75.75 0 0 0-1.06 0l-2.97 2.97ZM12 7a1 1 0 1 1 2 0 1 1 0 0 1-2 0Z"
+        clipRule="evenodd"
+      />
+    </svg>
+  );
 }
