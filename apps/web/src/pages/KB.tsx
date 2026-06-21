@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import {
   listKb,
   getKbArticle,
@@ -260,24 +261,38 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   );
 }
 
-// Minimal markdown: paragraphs split on blank lines, **bold** inline. Enough for
-// the structured Q&A bodies we generate without pulling in a markdown library.
+// Render the article markdown (headings, lists, blockquotes, bold, code, links).
+// Styled via a components map since the Tailwind typography plugin isn't installed.
 function Markdown({ body }: { body: string }) {
   return (
-    <div className="space-y-2 text-sm text-gray-800">
-      {body.split(/\n{2,}/).map((para, i) => (
-        <p key={i} className="whitespace-pre-wrap">
-          {para.split(/(\*\*[^*]+\*\*)/).map((seg, j) =>
-            seg.startsWith('**') && seg.endsWith('**') ? <strong key={j}>{seg.slice(2, -2)}</strong> : seg,
-          )}
-        </p>
-      ))}
+    <div className="text-sm text-gray-800">
+      <ReactMarkdown
+        components={{
+          h1: ({ children }) => <h1 className="mb-1 mt-4 text-lg font-semibold">{children}</h1>,
+          h2: ({ children }) => <h2 className="mb-1 mt-4 text-base font-semibold">{children}</h2>,
+          h3: ({ children }) => <h3 className="mb-1 mt-3 text-sm font-semibold">{children}</h3>,
+          p: ({ children }) => <p className="my-2 leading-relaxed">{children}</p>,
+          ul: ({ children }) => <ul className="my-2 list-disc space-y-1 pl-5">{children}</ul>,
+          ol: ({ children }) => <ol className="my-2 list-decimal space-y-1 pl-5">{children}</ol>,
+          strong: ({ children }) => <strong className="font-semibold">{children}</strong>,
+          blockquote: ({ children }) => (
+            <blockquote className="my-2 border-l-2 border-gray-300 pl-3 italic text-gray-600">{children}</blockquote>
+          ),
+          code: ({ children }) => <code className="rounded bg-gray-100 px-1 text-xs">{children}</code>,
+          a: ({ href, children }) => (
+            <a href={href} target="_blank" rel="noreferrer" className="text-blue-700 underline">{children}</a>
+          ),
+        }}
+      >
+        {body}
+      </ReactMarkdown>
     </div>
   );
 }
 
 function snippet(body: string): string {
-  return body.replace(/\*\*/g, '').replace(/\s+/g, ' ').trim().slice(0, 160);
+  // Strip common markdown markers for a clean text preview.
+  return body.replace(/[#>*`]/g, '').replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
 function fmtDate(iso: string | null): string {
