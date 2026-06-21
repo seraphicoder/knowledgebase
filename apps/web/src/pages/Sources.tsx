@@ -27,6 +27,7 @@ export function Sources() {
 
   const [running, setRunning] = useState(false);
   const [ingestResult, setIngestResult] = useState<IngestStats | null>(null);
+  const [limit, setLimit] = useState('250'); // newest N per source; blank = backend default
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -44,7 +45,24 @@ export function Sources() {
 
   useEffect(() => {
     void load();
+    // Reflect a run already in progress on the backend (survives page reloads).
+    void getIngestStatus()
+      .then((s) => {
+        if (s.running) {
+          setRunning(true);
+          pollIngest();
+        } else if (s.lastFinished) {
+          setIngestResult(s.lastFinished.stats);
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load]);
+
+  function limitArg(): number | undefined {
+    const n = Number(limit);
+    return limit.trim() && Number.isFinite(n) && n > 0 ? n : undefined;
+  }
 
   function pollIngest() {
     getIngestStatus()
@@ -64,7 +82,7 @@ export function Sources() {
     setError(null);
     setIngestResult(null);
     try {
-      await ingestAllSources();
+      await ingestAllSources(limitArg());
       pollIngest();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start ingestion');
@@ -77,7 +95,7 @@ export function Sources() {
     setError(null);
     setIngestResult(null);
     try {
-      await ingestOneSource(id);
+      await ingestOneSource(id, limitArg());
       pollIngest();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start ingestion');
@@ -140,6 +158,20 @@ export function Sources() {
           <p className="text-sm text-gray-500">Connect Zendesk and email (IMAP), then pull tickets from all active sources.</p>
         </div>
         <div className="flex items-center gap-2">
+          <label className="flex items-center gap-1 text-xs text-gray-500">
+            Newest
+            <input
+              type="number"
+              min={1}
+              value={limit}
+              onChange={(e) => setLimit(e.target.value)}
+              disabled={running}
+              className="w-20 rounded border border-gray-300 px-2 py-1.5 text-sm disabled:opacity-50"
+              placeholder="all"
+              title="How many of the newest tickets to pull per source (blank = backend default). Re-run to walk further back."
+            />
+            per source
+          </label>
           <button
             onClick={() => void onIngestAll()}
             disabled={running}
@@ -162,7 +194,14 @@ export function Sources() {
         <>
           {error && <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
-          {ingestResult && (
+          {running && (
+            <div className="mb-4 flex items-center gap-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+              <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-amber-400 border-t-transparent" />
+              Pulling tickets in the background… this keeps running even if you leave the page.
+            </div>
+          )}
+
+          {ingestResult && !running && (
             <div className="mb-4 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
               Pulled from {ingestResult.sources} source{ingestResult.sources === 1 ? '' : 's'}:{' '}
               <strong>{ingestResult.inserted} new ticket{ingestResult.inserted === 1 ? '' : 's'}</strong> staged,{' '}
