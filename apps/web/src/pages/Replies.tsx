@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  listApproved,
+  listQueued,
   suggestForThread,
   suggestForText,
   listSuggestions,
   getSuggestion,
   decideSuggestion,
   reviewSuggestion,
-  type ApprovedThread,
+  type QueuedThread,
   type SuggestionSummary,
   type SuggestionDetailResponse,
 } from '../lib/api';
@@ -18,7 +18,7 @@ import { supabase } from '../lib/supabase';
 // reply (with confidence + cited sources), edit/accept/discard it, and score it.
 // Scoring feeds verified pairs that improve future suggestions. NEVER auto-sends.
 export function Replies() {
-  const [threads, setThreads] = useState<ApprovedThread[]>([]);
+  const [threads, setThreads] = useState<QueuedThread[]>([]);
   const [suggestions, setSuggestions] = useState<SuggestionSummary[]>([]);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +36,7 @@ export function Replies() {
   }, []);
 
   useEffect(() => {
-    listApproved().then((r) => setThreads(r.threads)).catch(() => setThreads([]));
+    listQueued().then((r) => setThreads(r.threads)).catch(() => setThreads([]));
     void loadSuggestions();
   }, [loadSuggestions]);
 
@@ -82,7 +82,7 @@ export function Replies() {
         <div>
           <nav className="mb-2 flex flex-wrap gap-4 text-sm">
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
-            <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
+            <Link to="/queued" className="text-gray-500 hover:underline">Queued</Link>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <span className="font-medium text-gray-900">Reply Agent</span>
@@ -118,17 +118,17 @@ export function Replies() {
             {pasteBusy ? 'Drafting…' : 'Draft reply'}
           </button>
 
-          <h2 className="mb-2 text-sm font-medium text-gray-700">…or from an existing ticket</h2>
+          <h2 className="mb-2 text-sm font-medium text-gray-700">…or from a queued ticket</h2>
           <input
             type="search"
-            placeholder="Search approved tickets…"
+            placeholder="Search queued tickets…"
             className="mb-2 w-full rounded border border-gray-300 px-3 py-1.5 text-sm"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className="divide-y divide-gray-100 rounded border border-gray-200">
             {visibleThreads.length === 0 ? (
-              <p className="px-3 py-6 text-center text-sm text-gray-400">No approved tickets.</p>
+              <p className="px-3 py-6 text-center text-sm text-gray-400">No queued tickets.</p>
             ) : (
               visibleThreads.map((t) => (
                 <div key={t.id} className="flex items-center justify-between gap-2 px-3 py-2 text-sm">

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import './index.css';
 import { Staging } from './pages/Staging';
-import { Approved } from './pages/Approved';
+import { Queued } from './pages/Queued';
 import { Review } from './pages/Review';
 import { KB } from './pages/KB';
 import { Replies } from './pages/Replies';
@@ -50,10 +50,10 @@ createRoot(rootEl).render(
           }
         />
         <Route
-          path="/approved"
+          path="/queued"
           element={
             <RequireAuth>
-              <Approved />
+              <Queued />
             </RequireAuth>
           }
         />

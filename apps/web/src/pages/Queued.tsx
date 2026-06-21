@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  listApproved,
+  listQueued,
   getThread,
-  type ApprovedThread,
+  type QueuedThread,
   type ThreadDetail,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { ThreadImages } from '../components/ThreadImages';
 
-// Approved threads leave the Staging list, so this read-only tab is where you
-// see what's been approved, its pipeline state, and the original source content.
-export function Approved() {
-  const [threads, setThreads] = useState<ApprovedThread[]>([]);
+// Queued threads leave the Staging list, so this read-only tab is where you see
+// what's been queued, its pipeline state, and the original source content.
+export function Queued() {
+  const [threads, setThreads] = useState<QueuedThread[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,11 +23,11 @@ export function Approved() {
     setLoading(true);
     setError(null);
     try {
-      const res = await listApproved();
+      const res = await listQueued();
       setThreads(res.threads);
       setTotal(res.total);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load approved threads');
+      setError(e instanceof Error ? e.message : 'Failed to load queued threads');
     } finally {
       setLoading(false);
     }
@@ -64,15 +64,15 @@ export function Approved() {
         <div>
           <nav className="mb-2 flex gap-4 text-sm">
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
-            <span className="font-medium text-gray-900">Approved</span>
+            <span className="font-medium text-gray-900">Queued</span>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
             <Link to="/users" className="text-gray-500 hover:underline">Users</Link>
           </nav>
-          <h1 className="text-2xl font-semibold text-gray-900">Approved Threads</h1>
-          <p className="text-sm text-gray-500">{total} approved — eligible for / processed by the pipeline.</p>
+          <h1 className="text-2xl font-semibold text-gray-900">Queued Threads</h1>
+          <p className="text-sm text-gray-500">{total} queued — waiting for or already processed by the pipeline.</p>
         </div>
         <button
           onClick={() => void supabase.auth.signOut()}
@@ -114,7 +114,7 @@ export function Approved() {
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
             ) : visible.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">
-                {search ? 'No threads match your search.' : 'No approved threads yet.'}
+                {search ? 'No threads match your search.' : 'No queued threads yet.'}
               </td></tr>
             ) : (
               visible.map((t) => (

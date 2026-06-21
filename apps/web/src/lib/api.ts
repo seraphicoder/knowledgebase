@@ -91,12 +91,14 @@ export function listArticleImages(articleId: string): Promise<{ images: ArticleI
   return request(`/api/kb/${articleId}/images`);
 }
 
-export interface ApprovedThread extends StagedThread {
+export interface QueuedThread extends StagedThread {
   approved_at: string | null;
   processing_status: string;
 }
 
-export function listApproved(): Promise<{ threads: ApprovedThread[]; total: number }> {
+// Backend route stays /threads/approved (DB column is approval_status); the UI
+// calls these "queued".
+export function listQueued(): Promise<{ threads: QueuedThread[]; total: number }> {
   return request('/api/threads/approved');
 }
 

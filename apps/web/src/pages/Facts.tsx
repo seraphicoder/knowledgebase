@@ -80,7 +80,7 @@ export function Facts() {
         <div>
           <nav className="mb-2 flex gap-4 text-sm">
             <Link to="/staging" className="text-gray-500 hover:underline">Staging</Link>
-            <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
+            <Link to="/queued" className="text-gray-500 hover:underline">Queued</Link>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>

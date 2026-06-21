@@ -179,7 +179,7 @@ export function Staging() {
         <div>
           <nav className="mb-2 flex gap-4 text-sm">
             <span className="font-medium text-gray-900">Staging</span>
-            <Link to="/approved" className="text-gray-500 hover:underline">Approved</Link>
+            <Link to="/queued" className="text-gray-500 hover:underline">Queued</Link>
             <Link to="/review" className="text-gray-500 hover:underline">Review</Link>
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
@@ -188,7 +188,7 @@ export function Staging() {
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Staging Review</h1>
           <p className="text-sm text-gray-500">
-            {total} staged thread{total === 1 ? '' : 's'} — nothing is AI-processed until you approve it.
+            {total} staged thread{total === 1 ? '' : 's'} — nothing is AI-processed until you queue it.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -196,9 +196,9 @@ export function Staging() {
             onClick={onRunPipeline}
             disabled={running}
             className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
-            title="Runs the AI extraction pipeline on all approved threads"
+            title="Runs the AI extraction pipeline on all queued threads"
           >
-            {running ? 'Processing…' : 'Process Approved Threads'}
+            {running ? 'Processing…' : 'Process Queued Threads'}
           </button>
           <button
             onClick={() => void supabase.auth.signOut()}
@@ -212,7 +212,7 @@ export function Staging() {
       {runResult && (
         <div className="mb-4 rounded border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800">
           Pipeline run: <strong>{runResult.extracted} draft{runResult.extracted === 1 ? '' : 's'}</strong> created from{' '}
-          {runResult.considered} approved thread{runResult.considered === 1 ? '' : 's'} — {runResult.skippedLowRelevance} low-relevance,{' '}
+          {runResult.considered} queued thread{runResult.considered === 1 ? '' : 's'} — {runResult.skippedLowRelevance} low-relevance,{' '}
           {runResult.skippedDuplicate} duplicate, {runResult.skippedNoKnowledge} no reusable knowledge, {runResult.errored} errored.{' '}
           {runResult.extracted > 0 && (
             <Link to="/review" className="font-medium underline">Review drafts →</Link>
@@ -250,7 +250,7 @@ export function Staging() {
           disabled={busy || selected.size === 0}
           className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
         >
-          Approve Selected ({selected.size})
+          Queue Selected ({selected.size})
         </button>
         <button
           onClick={onExclude}
