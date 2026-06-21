@@ -69,6 +69,7 @@ export function Approved() {
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
+            <Link to="/users" className="text-gray-500 hover:underline">Users</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Approved Threads</h1>
           <p className="text-sm text-gray-500">{total} approved — eligible for / processed by the pipeline.</p>

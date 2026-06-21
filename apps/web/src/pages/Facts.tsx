@@ -85,6 +85,7 @@ export function Facts() {
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <span className="font-medium text-gray-900">Domain Facts</span>
+            <Link to="/users" className="text-gray-500 hover:underline">Users</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Domain Facts</h1>
           <p className="text-sm text-gray-500">

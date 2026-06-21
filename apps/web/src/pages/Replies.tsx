@@ -87,6 +87,7 @@ export function Replies() {
             <Link to="/kb" className="text-gray-500 hover:underline">Knowledge Base</Link>
             <span className="font-medium text-gray-900">Reply Agent</span>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
+            <Link to="/users" className="text-gray-500 hover:underline">Users</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Reply Agent</h1>
           <p className="text-sm text-gray-500">Draft a KB-grounded reply for a ticket. Suggestions only — nothing is ever sent.</p>

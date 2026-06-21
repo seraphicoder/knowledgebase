@@ -257,11 +257,60 @@ export interface KbArticleSummary {
   category: string | null;
   tags: string[];
   published_at: string | null;
+  needs_update: boolean;
 }
 
 export interface KbArticleDetail extends KbArticleSummary {
   body: string;
   extraction_id: string | null;
+  flag_reason: string | null;
+  flagged_at: string | null;
+}
+
+export interface ArticleComment {
+  id: string;
+  body: string;
+  created_at: string;
+  author: string;
+}
+
+export function listComments(articleId: string): Promise<{ comments: ArticleComment[] }> {
+  return request(`/api/kb/${articleId}/comments`);
+}
+
+export function addComment(articleId: string, body: string): Promise<{ ok: boolean; id: string }> {
+  return request(`/api/kb/${articleId}/comments`, { method: 'POST', body: JSON.stringify({ body }) });
+}
+
+export function flagArticle(articleId: string, reason?: string): Promise<{ ok: boolean }> {
+  return request(`/api/kb/${articleId}/flag`, { method: 'POST', body: JSON.stringify({ reason }) });
+}
+
+export function unflagArticle(articleId: string): Promise<{ ok: boolean }> {
+  return request(`/api/kb/${articleId}/unflag`, { method: 'POST' });
+}
+
+// ─── Users & roles ──────────────────────────────────────────
+
+export type UserRole = 'admin' | 'reviewer' | 'sme' | 'member' | 'viewer';
+
+export interface OrgUser {
+  id: string;
+  email: string;
+  role: UserRole;
+  created_at: string;
+}
+
+export function getMe(): Promise<{ userId: string; orgId: string; role: UserRole }> {
+  return request('/api/me');
+}
+
+export function listUsers(): Promise<{ users: OrgUser[] }> {
+  return request('/api/users');
+}
+
+export function updateUserRole(id: string, role: UserRole): Promise<{ ok: boolean }> {
+  return request(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) });
 }
 
 export interface KbSearchResult {

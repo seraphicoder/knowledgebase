@@ -6,7 +6,7 @@ import { writeAudit } from '../lib/audit.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
 import { log } from '../lib/logger.js';
 
-const MANAGER_ROLES = new Set(['admin', 'reviewer', 'sme']);
+const MANAGER_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
 
 // Knowledge base read + search. Published articles are readable by everyone in
 // the org (that's the point of the KB). Search is semantic (pgvector) with a
@@ -23,7 +23,7 @@ kb.get('/kb', async (c) => {
   const offset = Number(c.req.query('offset') ?? 0);
   const { data, error, count } = await getServiceClient()
     .from('kb_articles')
-    .select('id, title, category, tags, published_at', { count: 'exact' })
+    .select('id, title, category, tags, published_at, needs_update', { count: 'exact' })
     .eq('org_id', orgId)
     .order('published_at', { ascending: false })
     .range(offset, offset + limit - 1);
@@ -40,7 +40,7 @@ kb.get('/kb/:id', async (c: Context<{ Variables: AuthVars }>) => {
 
   const { data: article, error } = await db
     .from('kb_articles')
-    .select('id, title, body, category, tags, published_at, extraction_id')
+    .select('id, title, body, category, tags, published_at, extraction_id, needs_update, flag_reason, flagged_at')
     .eq('org_id', orgId)
     .eq('id', id)
     .single();
@@ -96,6 +96,100 @@ kb.get('/kb/:id/images', async (c: Context<{ Variables: AuthVars }>) => {
     url: urlByPath.get(r.storage_path as string) ?? null,
   }));
   return c.json({ images });
+});
+
+// ─── GET /api/kb/:id/comments ───────────────────────────────
+kb.get('/kb/:id/comments', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId } = c.get('auth');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+  const db = getServiceClient();
+
+  const { data: comments, error } = await db
+    .from('kb_article_comments')
+    .select('id, user_id, body, created_at')
+    .eq('org_id', orgId)
+    .eq('kb_article_id', id)
+    .order('created_at', { ascending: true });
+  if (error) return c.json({ error: error.message }, 500);
+
+  const rows = comments ?? [];
+  const userIds = [...new Set(rows.map((r) => r.user_id as string).filter(Boolean))];
+  const emailById = new Map<string, string>();
+  if (userIds.length > 0) {
+    const { data: users } = await db.from('users').select('id, email').in('id', userIds);
+    for (const u of users ?? []) emailById.set(u.id as string, u.email as string);
+  }
+  return c.json({
+    comments: rows.map((r) => ({
+      id: r.id,
+      body: r.body,
+      created_at: r.created_at,
+      author: emailById.get(r.user_id as string) ?? 'unknown',
+    })),
+  });
+});
+
+// ─── POST /api/kb/:id/comments — add a comment (any member) ──
+const commentSchema = z.object({ body: z.string().trim().min(1).max(5000) });
+
+kb.post('/kb/:id/comments', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId } = c.get('auth');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+  const parsed = commentSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'Comment cannot be empty' }, 400);
+  const db = getServiceClient();
+
+  const { data, error } = await db
+    .from('kb_article_comments')
+    .insert({ org_id: orgId, kb_article_id: id, user_id: userId, body: parsed.data.body })
+    .select('id')
+    .single();
+  if (error) return c.json({ error: error.message }, 500);
+  await writeAudit({ orgId, userId, action: 'comment.created', resource: 'kb_article_comments', resourceId: data.id as string, metadata: { articleId: id } });
+  return c.json({ ok: true, id: data.id });
+});
+
+// ─── POST /api/kb/:id/flag — mark needs update (any member) ──
+const flagSchema = z.object({ reason: z.string().trim().max(2000).optional() });
+
+kb.post('/kb/:id/flag', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId } = c.get('auth');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+  const parsed = flagSchema.safeParse(await c.req.json().catch(() => ({})));
+  const db = getServiceClient();
+
+  const { data, error } = await db
+    .from('kb_articles')
+    .update({ needs_update: true, flag_reason: parsed.success ? parsed.data.reason ?? null : null, flagged_by: userId, flagged_at: new Date().toISOString() })
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .select('id');
+  if (error) return c.json({ error: error.message }, 500);
+  if (!data || data.length === 0) return c.json({ error: 'Article not found' }, 404);
+  await writeAudit({ orgId, userId, action: 'article.flagged', resource: 'kb_articles', resourceId: id });
+  return c.json({ ok: true });
+});
+
+// ─── POST /api/kb/:id/unflag — clear the flag (managers) ────
+kb.post('/kb/:id/unflag', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!MANAGER_ROLES.has(role)) return c.json({ error: 'Only reviewers can clear flags' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+
+  const { data, error } = await getServiceClient()
+    .from('kb_articles')
+    .update({ needs_update: false, flag_reason: null, flagged_by: null, flagged_at: null })
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .select('id');
+  if (error) return c.json({ error: error.message }, 500);
+  if (!data || data.length === 0) return c.json({ error: 'Article not found' }, 404);
+  await writeAudit({ orgId, userId, action: 'article.unflagged', resource: 'kb_articles', resourceId: id });
+  return c.json({ ok: true });
 });
 
 // ─── POST /api/kb/:id/unpublish — move article back to draft ──

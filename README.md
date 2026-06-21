@@ -24,7 +24,7 @@ apps/
   web/                 # React + Vite + Tailwind
     src/pages/         # Login, Staging, Approved, Review, KB, Replies, Facts
     src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role
 ```
 
 ## Setup
@@ -131,7 +131,9 @@ Publish**), and Milestone 4 KB output. At review time, a draft is checked for **
 published articles** (flagged in the queue and inside the draft, with links); a
 reviewer can **AI-merge** the draft into an existing article (Claude unifies them,
 human edits/approves, the article re-versions and the draft is marked `merged`)
-instead of creating a duplicate. Published articles are **searchable in plain
+instead of creating a duplicate. Published articles support **comments** and a **"needs update" flag** (flagged
+articles are badged in the list and on the article; managers clear the flag, and
+merging/editing auto-clears it). They're **searchable in plain
 language** (pgvector semantic search + keyword fallback) and **editable**
 (an article's **Edit** moves it back to draft in Review, where text + images are
 updated and it's re-published). A "Process Approved Threads" button on `/staging`

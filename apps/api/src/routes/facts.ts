@@ -11,7 +11,7 @@ import { requireAuth, type AuthVars } from '../lib/auth.js';
 export const facts = new Hono<{ Variables: AuthVars }>();
 facts.use('*', requireAuth);
 
-const MANAGER_ROLES = new Set(['admin', 'reviewer', 'sme']);
+const MANAGER_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
 const canManage = (role: string): boolean => MANAGER_ROLES.has(role);
 
 const COLS = 'id, term, fact, active, created_at, updated_at';

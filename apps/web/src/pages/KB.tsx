@@ -6,9 +6,14 @@ import {
   getKbArticle,
   searchKb,
   unpublishArticle,
+  listComments,
+  addComment,
+  flagArticle,
+  unflagArticle,
   type KbArticleSummary,
   type KbArticleDetail,
   type KbSearchResult,
+  type ArticleComment,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { ArticleImages } from '../components/ThreadImages';
@@ -82,6 +87,7 @@ export function KB() {
             <span className="font-medium text-gray-900">Knowledge Base</span>
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
+            <Link to="/users" className="text-gray-500 hover:underline">Users</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Knowledge Base</h1>
           <p className="text-sm text-gray-500">Search published answers in plain language.</p>
@@ -164,6 +170,9 @@ export function KB() {
                     <tr key={a.id} className="border-t border-gray-100 hover:bg-gray-50">
                       <td className="px-3 py-2">
                         <button onClick={() => setOpenId(a.id)} className="text-left font-medium text-blue-700 hover:underline">{a.title}</button>
+                        {a.needs_update && (
+                          <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800" title="Flagged: needs update">⚠ needs update</span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-gray-600">{a.category || '—'}</td>
                       <td className="px-3 py-2 text-gray-600">{a.tags.slice(0, 3).join(', ')}</td>
@@ -187,7 +196,65 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const [source, setSource] = useState<{ id: string; subject: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [comments, setComments] = useState<ArticleComment[]>([]);
+  const [newComment, setNewComment] = useState('');
   const navigate = useNavigate();
+
+  const reloadArticle = useCallback(async () => {
+    const res = await getKbArticle(id);
+    setArticle(res.article);
+    setSource(res.source);
+  }, [id]);
+
+  const reloadComments = useCallback(async () => {
+    setComments((await listComments(id)).comments);
+  }, [id]);
+
+  useEffect(() => {
+    void reloadComments().catch(() => setComments([]));
+  }, [reloadComments]);
+
+  async function onPostComment() {
+    if (!newComment.trim()) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await addComment(id, newComment.trim());
+      setNewComment('');
+      await reloadComments();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to add comment');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFlag() {
+    const reason = prompt('Why does this article need updating? (optional)') ?? undefined;
+    setBusy(true);
+    setError(null);
+    try {
+      await flagArticle(id, reason);
+      await reloadArticle();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to flag article');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onUnflag() {
+    setBusy(true);
+    setError(null);
+    try {
+      await unflagArticle(id);
+      await reloadArticle();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to clear flag');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function onEdit() {
     if (!article) return;
@@ -242,11 +309,26 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
             <div className="mb-3 flex flex-wrap items-center gap-2 text-xs text-gray-500">
               {article.category && <span className="rounded bg-gray-100 px-2 py-0.5">{article.category}</span>}
               {article.tags.map((t) => <span key={t} className="rounded bg-gray-100 px-2 py-0.5">{t}</span>)}
-              <button onClick={onEdit} disabled={busy} className="ml-auto rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40">
-                {busy ? 'Moving…' : 'Edit'}
+              {article.needs_update ? (
+                <button onClick={onUnflag} disabled={busy} className="ml-auto rounded border border-amber-300 bg-amber-50 px-2 py-0.5 text-amber-800 hover:bg-amber-100 disabled:opacity-40">
+                  Clear flag
+                </button>
+              ) : (
+                <button onClick={onFlag} disabled={busy} className="ml-auto rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40">
+                  Flag for update
+                </button>
+              )}
+              <button onClick={onEdit} disabled={busy} className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50 disabled:opacity-40">
+                {busy ? '…' : 'Edit'}
               </button>
               <button onClick={download} className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50">Download .md</button>
             </div>
+
+            {article.needs_update && (
+              <div className="mb-3 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                ⚠ Flagged as needing an update{article.flag_reason ? `: ${article.flag_reason}` : ''}.
+              </div>
+            )}
             <Markdown body={article.body} />
             <ArticleImages articleId={article.id} />
             {source && (
@@ -254,6 +336,32 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 Source thread: <span className="font-medium text-gray-700">{source.subject || '(no subject)'}</span>
               </p>
             )}
+
+            {/* Comments */}
+            <div className="mt-4 border-t border-gray-100 pt-3">
+              <h3 className="mb-2 text-sm font-medium text-gray-700">Comments ({comments.length})</h3>
+              <div className="space-y-2">
+                {comments.map((cm) => (
+                  <div key={cm.id} className="rounded bg-gray-50 px-3 py-2 text-sm">
+                    <p className="text-gray-800">{cm.body}</p>
+                    <p className="mt-1 text-xs text-gray-400">{cm.author} · {new Date(cm.created_at).toLocaleString()}</p>
+                  </div>
+                ))}
+                {comments.length === 0 && <p className="text-xs text-gray-400">No comments yet.</p>}
+              </div>
+              <div className="mt-2 flex gap-2">
+                <input
+                  className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  placeholder="Add a comment…"
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && void onPostComment()}
+                />
+                <button onClick={() => void onPostComment()} disabled={busy || !newComment.trim()} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
+                  Post
+                </button>
+              </div>
+            </div>
           </>
         )}
       </div>

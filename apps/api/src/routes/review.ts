@@ -14,8 +14,9 @@ import { embedText, toVector } from '../pipeline/embedder.js';
 export const review = new Hono<{ Variables: AuthVars }>();
 review.use('*', requireAuth);
 
-// Who may qualify drafts. Viewers are read-only.
-const REVIEWER_ROLES = new Set(['admin', 'reviewer', 'sme']);
+// Who may qualify drafts. For now every role except read-only 'viewer' can —
+// tighten here to differentiate roles later.
+const REVIEWER_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
 const canReview = (role: string): boolean => REVIEWER_ROLES.has(role);
 
 const EXTRACTION_COLS =
@@ -191,7 +192,16 @@ review.post('/extractions/:id/merge', async (c: Context<{ Variables: AuthVars }>
   const embedding = toVector(await embedText(`${parsed.data.title}\n${parsed.data.body}`));
   const { error: upErr } = await db
     .from('kb_articles')
-    .update({ title: parsed.data.title, body: parsed.data.body, embedding, version: ((article.version as number) ?? 1) + 1 })
+    .update({
+      title: parsed.data.title,
+      body: parsed.data.body,
+      embedding,
+      version: ((article.version as number) ?? 1) + 1,
+      needs_update: false, // updating it resolves any "needs update" flag
+      flag_reason: null,
+      flagged_by: null,
+      flagged_at: null,
+    })
     .eq('org_id', orgId)
     .eq('id', parsed.data.articleId);
   if (upErr) return c.json({ error: upErr.message }, 500);

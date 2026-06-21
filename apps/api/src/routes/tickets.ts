@@ -13,7 +13,7 @@ import { embedText, toVector } from '../pipeline/embedder.js';
 export const tickets = new Hono<{ Variables: AuthVars }>();
 tickets.use('*', requireAuth);
 
-const AGENT_ROLES = new Set(['admin', 'reviewer', 'sme']);
+const AGENT_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
 const canAct = (role: string): boolean => AGENT_ROLES.has(role);
 
 // ─── POST /api/tickets/:threadId/suggest ────────────────────
