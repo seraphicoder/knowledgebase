@@ -24,7 +24,7 @@ apps/
   web/                 # React + Vite + Tailwind
     src/pages/         # Login, Staging, Approved, Review, KB, Replies, Facts
     src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text
 ```
 
 ## Setup

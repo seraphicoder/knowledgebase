@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { listQueued, getThread, type QueuedThread, type ThreadDetail } from '../lib/api';
 import { supabase } from '../lib/supabase';
@@ -8,25 +8,22 @@ import { useInfinitePages } from '../lib/useInfinitePages';
 // Queued threads leave the Staging list, so this read-only tab is where you see
 // what's been queued, its pipeline state, and the original source content.
 export function Queued() {
-  const { items: threads, total, loading, error: loadError, sentinelRef } = useInfinitePages<QueuedThread>(
-    (offset, limit) => listQueued({ offset, limit }).then((r) => ({ items: r.threads, total: r.total })),
-    'queued',
-  );
   const [search, setSearch] = useState('');
+  const [q, setQ] = useState(''); // debounced, server-side query
+
+  // Debounce the search box so each keystroke doesn't refetch.
+  useEffect(() => {
+    const t = setTimeout(() => setQ(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { items: threads, total, loading, error: loadError, sentinelRef } = useInfinitePages<QueuedThread>(
+    (offset, limit) => listQueued({ offset, limit }, q || undefined).then((r) => ({ items: r.threads, total: r.total })),
+    q, // reload whenever the server-side query changes
+  );
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ThreadDetail | null>(null);
   const error = loadError ?? previewError;
-
-  const visible = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return threads;
-    return threads.filter((t) =>
-      [t.subject ?? '', t.source_id, t.participants.join(' '), t.processing_status, fmtDate(t.date_range_start)]
-        .join(' ')
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [threads, search]);
 
   async function openPreview(id: string) {
     setPreview(null);
@@ -66,12 +63,12 @@ export function Queued() {
       <div className="mb-3 flex items-center gap-2">
         <input
           type="search"
-          placeholder="Search loaded threads…"
+          placeholder="Search subject or participants…"
           className="w-full max-w-md rounded border border-gray-300 px-3 py-1.5 text-sm"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {search && <span className="text-xs text-gray-500">{visible.length} match{visible.length === 1 ? '' : 'es'}</span>}
+        {search.trim() && !loading && <span className="text-xs text-gray-500">{total} match{total === 1 ? '' : 'es'}</span>}
       </div>
 
       {error && (
@@ -93,12 +90,12 @@ export function Queued() {
           <tbody>
             {loading && threads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
-            ) : visible.length === 0 ? (
+            ) : threads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">
-                {search ? 'No threads match your search.' : 'No queued threads yet.'}
+                {search.trim() ? 'No threads match your search.' : 'No queued threads yet.'}
               </td></tr>
             ) : (
-              visible.map((t) => (
+              threads.map((t) => (
                 <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2">
                     <button onClick={() => openPreview(t.id)} className="text-left font-medium text-blue-700 hover:underline">

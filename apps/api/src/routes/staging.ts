@@ -33,15 +33,16 @@ staging.get('/threads/staged', async (c) => {
     )
     .eq('org_id', orgId)
     .eq('approval_status', 'staged')
-    // Newest conversations first, regardless of ingest order/batch.
-    .order('date_range_end', { ascending: false, nullsFirst: false })
-    .order('ingested_at', { ascending: false })
     .range(offset, offset + limit - 1);
+
+  // Server-side sort over the whole dataset (default: newest conversations first).
+  query = applyThreadSort(query, c.req.query('sort'), c.req.query('dir'));
 
   if (sourceId) query = query.eq('source_id', sourceId);
   if (from) query = query.gte('date_range_start', from);
   if (to) query = query.lte('date_range_end', to);
-  if (search) query = query.ilike('subject', `%${search}%`);
+  // Substring match over subject + participants (trigram-indexed search_text).
+  if (search) query = query.ilike('search_text', `%${search}%`);
 
   const { data, error, count } = await query;
   if (error) return c.json({ error: error.message }, 500);
@@ -52,6 +53,30 @@ staging.get('/threads/staged', async (c) => {
   const withCounts = await annotateAttachmentCounts(db, orgId, ids, data ?? []);
   return c.json({ threads: withCounts, total: count ?? 0, limit, offset });
 });
+
+// Whitelist of sortable columns → server-side ORDER BY. Unknown/absent sort
+// falls back to newest-conversation-first (date_range_end, then ingest order).
+function applyThreadSort<
+  T extends { order: (col: string, opts?: { ascending?: boolean; nullsFirst?: boolean }) => T },
+>(query: T, sort: string | undefined, dir: string | undefined): T {
+  const ascending = dir === 'asc';
+  switch (sort) {
+    case 'subject':
+      return query.order('subject', { ascending });
+    case 'source_id':
+      return query.order('source_id', { ascending });
+    case 'participants':
+      return query.order('participants', { ascending });
+    case 'message_count':
+      return query.order('message_count', { ascending });
+    case 'date_range_start':
+      return query.order('date_range_start', { ascending, nullsFirst: false });
+    default:
+      return query
+        .order('date_range_end', { ascending: false, nullsFirst: false })
+        .order('ingested_at', { ascending: false });
+  }
+}
 
 // Adds `attachment_count` to each thread row using a single org-scoped query.
 async function annotateAttachmentCounts(
@@ -82,8 +107,9 @@ staging.get('/threads/approved', async (c) => {
   const db = getServiceClient();
   const limit = Math.min(Number(c.req.query('limit') ?? 200), 500);
   const offset = Number(c.req.query('offset') ?? 0);
+  const search = c.req.query('q');
 
-  const { data, error, count } = await db
+  let query = db
     .from('email_threads')
     .select(
       'id, source_id, external_thread_id, subject, participants, message_count, date_range_start, date_range_end, ingested_at, approved_at, processing_status',
@@ -94,6 +120,9 @@ staging.get('/threads/approved', async (c) => {
     .order('date_range_end', { ascending: false, nullsFirst: false })
     .order('approved_at', { ascending: false })
     .range(offset, offset + limit - 1);
+  if (search) query = query.ilike('search_text', `%${search}%`);
+
+  const { data, error, count } = await query;
   if (error) return c.json({ error: error.message }, 500);
   return c.json({ threads: data ?? [], total: count ?? 0, limit, offset });
 });

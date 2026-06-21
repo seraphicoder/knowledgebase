@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useInfinitePages } from '../lib/useInfinitePages';
 import {
@@ -23,40 +23,6 @@ import { ThreadImages } from '../components/ThreadImages';
 type SortKey = 'subject' | 'source_id' | 'participants' | 'message_count' | 'date_range_start';
 type SortDir = 'asc' | 'desc';
 
-function ts(d: string | null): number {
-  return d ? new Date(d).getTime() : 0;
-}
-
-// Match a thread against a lowercased query across every displayed column.
-function matchesSearch(t: StagedThread, q: string): boolean {
-  const haystack = [
-    t.subject ?? '',
-    t.source_id,
-    t.participants.join(' '),
-    String(t.message_count),
-    fmtDate(t.date_range_start),
-    t.date_range_start ?? '',
-  ]
-    .join(' ')
-    .toLowerCase();
-  return haystack.includes(q);
-}
-
-function compareThreads(a: StagedThread, b: StagedThread, key: SortKey): number {
-  switch (key) {
-    case 'subject':
-      return (a.subject ?? '').localeCompare(b.subject ?? '');
-    case 'source_id':
-      return a.source_id.localeCompare(b.source_id);
-    case 'participants':
-      return a.participants.join(', ').localeCompare(b.participants.join(', '));
-    case 'message_count':
-      return a.message_count - b.message_count;
-    case 'date_range_start':
-      return ts(a.date_range_start) - ts(b.date_range_start);
-  }
-}
-
 export function Staging() {
   const [filters, setFilters] = useState<StagedFilters>({});
   const { items: threads, total, loading, error: loadError, reload, sentinelRef } = useInfinitePages<StagedThread>(
@@ -69,10 +35,23 @@ export function Staging() {
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<PipelineStats | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>('date_range_start');
-  const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [search, setSearch] = useState('');
   const error = loadError ?? actionError;
+
+  // Sort lives in the server-side filters so it covers the whole dataset, not
+  // just the rows already scrolled into view.
+  const sortKey: SortKey = (filters.sort as SortKey) ?? 'date_range_start';
+  const sortDir: SortDir = filters.dir ?? 'desc';
+
+  // Debounce the search box into the server-side `q` filter (whole-dataset
+  // substring match over subject + participants). Reloads via the deps key.
+  useEffect(() => {
+    const q = search.trim();
+    const t = setTimeout(() => {
+      setFilters((f) => (f.q === (q || undefined) ? f : { ...f, q: q || undefined }));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   // Reload from the top and clear selection (after approve/exclude).
   function refresh() {
@@ -80,18 +59,10 @@ export function Staging() {
     reload();
   }
 
-  // Instant client-side search across all displayed columns, then sort.
-  const sortedThreads = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const filtered = q ? threads.filter((t) => matchesSearch(t, q)) : threads;
-    const dir = sortDir === 'asc' ? 1 : -1;
-    return [...filtered].sort((a, b) => dir * compareThreads(a, b, sortKey));
-  }, [threads, search, sortKey, sortDir]);
-
-  // Select-all operates on the currently visible (searched) rows.
-  const allSelected = sortedThreads.length > 0 && sortedThreads.every((t) => selected.has(t.id));
+  // Select-all operates on the currently loaded rows.
+  const allSelected = threads.length > 0 && threads.every((t) => selected.has(t.id));
   const toggleAll = () =>
-    setSelected(allSelected ? new Set() : new Set(sortedThreads.map((t) => t.id)));
+    setSelected(allSelected ? new Set() : new Set(threads.map((t) => t.id)));
   const toggleOne = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -102,13 +73,13 @@ export function Staging() {
   const selectedIds = useMemo(() => [...selected], [selected]);
 
   function onSort(key: SortKey) {
-    if (key === sortKey) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
-    } else {
-      setSortKey(key);
+    setFilters((f) => {
+      if (key === sortKey) {
+        return { ...f, dir: sortDir === 'asc' ? 'desc' : 'asc' };
+      }
       // Dates feel natural newest-first; text/number ascending.
-      setSortDir(key === 'date_range_start' ? 'desc' : 'asc');
-    }
+      return { ...f, sort: key, dir: key === 'date_range_start' ? 'desc' : 'asc' };
+    });
   }
 
   async function onApprove() {
@@ -225,18 +196,18 @@ export function Staging() {
 
       <Filters filters={filters} onChange={setFilters} onRefresh={refresh} />
 
-      {/* Instant search across all columns of the loaded threads. */}
+      {/* Server-side search over subject + participants across the whole dataset. */}
       <div className="mb-3 flex items-center gap-2">
         <input
           type="search"
-          placeholder="Search all columns (subject, source, participants, date…)"
+          placeholder="Search subject or participants…"
           className="w-full max-w-md rounded border border-gray-300 px-3 py-1.5 text-sm"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-        {search && (
+        {search.trim() && !loading && (
           <span className="text-xs text-gray-500">
-            {sortedThreads.length} match{sortedThreads.length === 1 ? '' : 'es'}
+            {total} match{total === 1 ? '' : 'es'}
           </span>
         )}
       </div>
@@ -281,12 +252,12 @@ export function Staging() {
           <tbody>
             {loading && threads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
-            ) : sortedThreads.length === 0 ? (
+            ) : threads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">
-                {search ? 'No threads match your search.' : 'No staged threads.'}
+                {search.trim() ? 'No threads match your search.' : 'No staged threads.'}
               </td></tr>
             ) : (
-              sortedThreads.map((t) => (
+              threads.map((t) => (
                 <tr key={t.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2">
                     <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleOne(t.id)} />

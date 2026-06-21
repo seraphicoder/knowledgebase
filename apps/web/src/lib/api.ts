@@ -51,6 +51,8 @@ export interface StagedFilters {
   from?: string;
   to?: string;
   q?: string;
+  sort?: string;
+  dir?: 'asc' | 'desc';
 }
 
 export interface Page {
@@ -67,6 +69,8 @@ export function listStaged(
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (filters.q) params.set('q', filters.q);
+  if (filters.sort) params.set('sort', filters.sort);
+  if (filters.dir) params.set('dir', filters.dir);
   if (page.limit != null) params.set('limit', String(page.limit));
   if (page.offset != null) params.set('offset', String(page.offset));
   const qs = params.toString();
@@ -107,8 +111,12 @@ export interface QueuedThread extends StagedThread {
 
 // Backend route stays /threads/approved (DB column is approval_status); the UI
 // calls these "queued".
-export function listQueued(page: Page = {}): Promise<{ threads: QueuedThread[]; total: number }> {
+export function listQueued(
+  page: Page = {},
+  q?: string,
+): Promise<{ threads: QueuedThread[]; total: number }> {
   const params = new URLSearchParams();
+  if (q) params.set('q', q);
   if (page.limit != null) params.set('limit', String(page.limit));
   if (page.offset != null) params.set('offset', String(page.offset));
   const qs = params.toString();
