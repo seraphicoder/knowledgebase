@@ -232,9 +232,42 @@ sources.post('/sources/ingest', async (c) => {
   const limit = parsed.success ? parsed.data.limit : undefined;
   if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
 
+  const db = getServiceClient();
+  const { data: srcs } = await db
+    .from('ingestion_sources')
+    .select('id, org_id, type, config')
+    .eq('org_id', orgId)
+    .eq('status', 'active');
+
   running.add(orgId);
-  void ingestAllSources(orgId, userId, limit)
+  void runIngest(orgId, userId, (srcs ?? []) as IngestionSourceRow[], limit)
     .catch((err) => log.error('ingest-all failed', { orgId, error: err instanceof Error ? err.message : String(err) }))
+    .finally(() => running.delete(orgId));
+  return c.json({ ok: true, started: true }, 202);
+});
+
+// ─── POST /api/sources/:id/ingest — pull ONE source ─────────
+sources.post('/sources/:id/ingest', async (c) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!requireAdmin(role)) return c.json({ error: 'Admin access required' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing source id' }, 400);
+  const parsed = ingestSchema.safeParse(await c.req.json().catch(() => ({})));
+  const limit = parsed.success ? parsed.data.limit : undefined;
+  if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
+
+  const db = getServiceClient();
+  const { data: src } = await db
+    .from('ingestion_sources')
+    .select('id, org_id, type, config')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .single();
+  if (!src) return c.json({ error: 'Source not found' }, 404);
+
+  running.add(orgId);
+  void runIngest(orgId, userId, [src as IngestionSourceRow], limit)
+    .catch((err) => log.error('source ingest failed', { orgId, sourceId: id, error: err instanceof Error ? err.message : String(err) }))
     .finally(() => running.delete(orgId));
   return c.json({ ok: true, started: true }, 202);
 });
@@ -253,15 +286,7 @@ sources.get('/sources/ingest/status', async (c) => {
   return c.json({ running: running.has(orgId), lastFinished });
 });
 
-async function ingestAllSources(orgId: string, userId: string, limit?: number): Promise<void> {
-  const db = getServiceClient();
-  const { data: srcs } = await db
-    .from('ingestion_sources')
-    .select('id, org_id, type, config')
-    .eq('org_id', orgId)
-    .eq('status', 'active');
-  const list = (srcs ?? []) as IngestionSourceRow[];
-
+async function runIngest(orgId: string, userId: string, list: IngestionSourceRow[], limit?: number): Promise<void> {
   await writeAudit({ orgId, userId, action: 'ingest.run_started', resource: 'ingestion_sources', resourceId: orgId, metadata: { sources: list.length, limit: limit ?? null } });
 
   let inserted = 0;

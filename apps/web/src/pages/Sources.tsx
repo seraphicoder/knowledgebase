@@ -7,6 +7,7 @@ import {
   deleteSource,
   testSource,
   ingestAllSources,
+  ingestOneSource,
   getIngestStatus,
   type IngestionSource,
   type CreateSourceInput,
@@ -64,6 +65,19 @@ export function Sources() {
     setIngestResult(null);
     try {
       await ingestAllSources();
+      pollIngest();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to start ingestion');
+      setRunning(false);
+    }
+  }
+
+  async function onIngestOne(id: string) {
+    setRunning(true);
+    setError(null);
+    setIngestResult(null);
+    try {
+      await ingestOneSource(id);
       pollIngest();
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to start ingestion');
@@ -188,6 +202,7 @@ export function Sources() {
                       <td className="px-3 py-2 text-gray-500">{s.last_synced_at ? new Date(s.last_synced_at).toLocaleString() : '—'}</td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex flex-wrap justify-end gap-1">
+                          <button onClick={() => void onIngestOne(s.id)} disabled={running || s.status !== 'active'} title={s.status !== 'active' ? 'Activate the source to pull' : 'Pull new tickets from this source'} className="rounded border border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-700 hover:bg-blue-100 disabled:opacity-40">Pull</button>
                           <button onClick={() => void onTest(s.id)} disabled={busyId === s.id} className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40">Test</button>
                           <button onClick={() => void onToggleStatus(s)} disabled={busyId === s.id} className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40">{s.status === 'active' ? 'Pause' : 'Activate'}</button>
                           <button onClick={() => void onDelete(s)} disabled={busyId === s.id} className="rounded border border-red-200 px-2 py-1 text-xs text-red-700 hover:bg-red-50 disabled:opacity-40">Delete</button>

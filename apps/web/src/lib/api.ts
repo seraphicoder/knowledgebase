@@ -653,6 +653,11 @@ export function ingestAllSources(limit?: number): Promise<{ ok: boolean; started
   return request('/api/sources/ingest', { method: 'POST', body: JSON.stringify(limit != null ? { limit } : {}) });
 }
 
+// Pull a single source on demand (e.g. just Zendesk).
+export function ingestOneSource(id: string, limit?: number): Promise<{ ok: boolean; started: boolean; alreadyRunning?: boolean }> {
+  return request(`/api/sources/${id}/ingest`, { method: 'POST', body: JSON.stringify(limit != null ? { limit } : {}) });
+}
+
 export function getIngestStatus(): Promise<{ running: boolean; lastFinished: { stats: IngestStats; at: string } | null }> {
   return request('/api/sources/ingest/status');
 }
