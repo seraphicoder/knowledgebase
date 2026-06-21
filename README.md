@@ -139,6 +139,10 @@ language** (pgvector semantic search + keyword fallback) and **editable**
 updated and it's re-published). A "Process Approved Threads" button on `/staging`
 triggers the pipeline.
 
+The data-heavy lists (Staging, Queued, Review, Knowledge Base) use **infinite
+scroll** — pages load as you scroll (50 at a time); client-side sort/search
+operate on the loaded rows. Smaller lists (Reply Agent, Users) load in one batch.
+
 UI tabs: `/staging` (sortable + searchable staged threads), `/approved`
 (read-only view of approved threads + pipeline status + original source),
 `/review` (qualify drafts; the source thread is shown via the

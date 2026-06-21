@@ -1,41 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import {
-  listQueued,
-  getThread,
-  type QueuedThread,
-  type ThreadDetail,
-} from '../lib/api';
+import { listQueued, getThread, type QueuedThread, type ThreadDetail } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { ThreadImages } from '../components/ThreadImages';
+import { useInfinitePages } from '../lib/useInfinitePages';
 
 // Queued threads leave the Staging list, so this read-only tab is where you see
 // what's been queued, its pipeline state, and the original source content.
 export function Queued() {
-  const [threads, setThreads] = useState<QueuedThread[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { items: threads, total, loading, error: loadError, sentinelRef } = useInfinitePages<QueuedThread>(
+    (offset, limit) => listQueued({ offset, limit }).then((r) => ({ items: r.threads, total: r.total })),
+    'queued',
+  );
   const [search, setSearch] = useState('');
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ThreadDetail | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listQueued();
-      setThreads(res.threads);
-      setTotal(res.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load queued threads');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const error = loadError ?? previewError;
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -50,11 +30,12 @@ export function Queued() {
 
   async function openPreview(id: string) {
     setPreview(null);
+    setPreviewError(null);
     try {
       const res = await getThread(id);
       setPreview(res.thread);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load preview');
+      setPreviewError(e instanceof Error ? e.message : 'Failed to load preview');
     }
   }
 
@@ -85,7 +66,7 @@ export function Queued() {
       <div className="mb-3 flex items-center gap-2">
         <input
           type="search"
-          placeholder="Search all columns…"
+          placeholder="Search loaded threads…"
           className="w-full max-w-md rounded border border-gray-300 px-3 py-1.5 text-sm"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -110,7 +91,7 @@ export function Queued() {
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {loading && threads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
             ) : visible.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">
@@ -135,6 +116,10 @@ export function Queued() {
           </tbody>
         </table>
       </div>
+
+      {/* Infinite-scroll sentinel */}
+      <div ref={sentinelRef} className="h-8" />
+      {loading && threads.length > 0 && <p className="py-2 text-center text-xs text-gray-400">Loading more…</p>}
 
       {preview && <PreviewDrawer thread={preview} onClose={() => setPreview(null)} />}
     </div>

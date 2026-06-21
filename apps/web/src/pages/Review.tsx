@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   listExtractions,
@@ -19,6 +19,7 @@ import {
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { Lightbox } from '../components/Lightbox';
+import { useInfinitePages } from '../lib/useInfinitePages';
 
 // Heavy canvas editor — lazy-loaded so it stays out of the main bundle.
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
@@ -31,30 +32,12 @@ interface ImageChoice {
 // Milestone 3 Review Queue. Humans qualify AI-drafted extractions: edit the
 // title/question/answer, then approve (becomes eligible to publish) or reject.
 export function Review() {
-  const [items, setItems] = useState<Extraction[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { items, total, loading, error, reload: load, sentinelRef } = useInfinitePages<Extraction>(
+    (offset, limit) => listExtractions('pending_review', { offset, limit }).then((r) => ({ items: r.extractions, total: r.total })),
+    'review',
+  );
   const [openId, setOpenId] = useState<string | null>(null);
   const [similarFlags, setSimilarFlags] = useState<Set<string>>(new Set());
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listExtractions('pending_review');
-      setItems(res.extractions);
-      setTotal(res.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load review queue');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   // Flag drafts that closely match an existing published article (best-effort).
   useEffect(() => {
@@ -124,10 +107,10 @@ export function Review() {
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {loading && items.length === 0 ? (
               <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
             ) : items.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No drafts to review. Approve threads in Staging, then run the pipeline.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No drafts to review. Queue threads in Staging, then run the pipeline.</td></tr>
             ) : (
               items.map((x) => (
                 <tr key={x.id} className="border-t border-gray-100 hover:bg-gray-50">
@@ -151,6 +134,8 @@ export function Review() {
           </tbody>
         </table>
       </div>
+      <div ref={sentinelRef} className="h-8" />
+      {loading && items.length > 0 && <p className="py-2 text-center text-xs text-gray-400">Loading more…</p>}
 
       {openId && (
         <ReviewDrawer

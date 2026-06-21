@@ -240,6 +240,14 @@ kb.post('/kb/search', async (c) => {
   const limit = parsed.data.limit ?? 8;
   const db = getServiceClient();
 
+  // Attach the needs_update flag so search results can show it like the list does.
+  async function attachFlags<T extends { id: string }>(rows: T[]): Promise<(T & { needs_update: boolean })[]> {
+    if (rows.length === 0) return [];
+    const { data } = await db.from('kb_articles').select('id, needs_update').eq('org_id', orgId).in('id', rows.map((r) => r.id));
+    const flagged = new Map((data ?? []).map((a) => [a.id as string, a.needs_update as boolean]));
+    return rows.map((r) => ({ ...r, needs_update: flagged.get(r.id) ?? false }));
+  }
+
   // 1. Try semantic search (needs an OpenAI key to embed the query).
   try {
     const embedding = await embedText(q);
@@ -250,7 +258,7 @@ kb.post('/kb/search', async (c) => {
     });
     if (error) throw new Error(error.message);
     const results = (data ?? []) as { id: string; title: string; body: string; similarity: number }[];
-    if (results.length > 0) return c.json({ mode: 'semantic', results });
+    if (results.length > 0) return c.json({ mode: 'semantic', results: await attachFlags(results) });
     // No semantic hits — fall through to keyword so the user still gets something.
   } catch (err) {
     log.info('kb semantic search unavailable, using keyword', {
@@ -268,5 +276,5 @@ kb.post('/kb/search', async (c) => {
     .limit(limit);
   if (error) return c.json({ error: error.message }, 500);
   const results = (data ?? []).map((a) => ({ ...a, similarity: null }));
-  return c.json({ mode: 'keyword', results });
+  return c.json({ mode: 'keyword', results: await attachFlags(results) });
 });

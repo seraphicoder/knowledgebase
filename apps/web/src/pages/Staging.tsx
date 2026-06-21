@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useInfinitePages } from '../lib/useInfinitePages';
 import {
   listStaged,
   getThread,
@@ -56,12 +57,13 @@ function compareThreads(a: StagedThread, b: StagedThread, key: SortKey): number 
 }
 
 export function Staging() {
-  const [threads, setThreads] = useState<StagedThread[]>([]);
-  const [total, setTotal] = useState(0);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [filters, setFilters] = useState<StagedFilters>({});
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { items: threads, total, loading, error: loadError, reload, sentinelRef } = useInfinitePages<StagedThread>(
+    (offset, limit) => listStaged(filters, { offset, limit }).then((r) => ({ items: r.threads, total: r.total })),
+    JSON.stringify(filters),
+  );
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [actionError, setActionError] = useState<string | null>(null);
   const [preview, setPreview] = useState<ThreadDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const [running, setRunning] = useState(false);
@@ -69,25 +71,13 @@ export function Staging() {
   const [sortKey, setSortKey] = useState<SortKey>('date_range_start');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [search, setSearch] = useState('');
+  const error = loadError ?? actionError;
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listStaged(filters);
-      setThreads(res.threads);
-      setTotal(res.total);
-      setSelected(new Set());
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load staged threads');
-    } finally {
-      setLoading(false);
-    }
-  }, [filters]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  // Reload from the top and clear selection (after approve/exclude).
+  function refresh() {
+    setSelected(new Set());
+    reload();
+  }
 
   // Instant client-side search across all displayed columns, then sort.
   const sortedThreads = useMemo(() => {
@@ -123,12 +113,12 @@ export function Staging() {
   async function onApprove() {
     if (selectedIds.length === 0) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       await approveBatch(selectedIds);
-      await load();
+      refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Approve failed');
+      setActionError(e instanceof Error ? e.message : 'Queue failed');
     } finally {
       setBusy(false);
     }
@@ -137,13 +127,13 @@ export function Staging() {
   async function onExclude() {
     if (selectedIds.length === 0) return;
     setBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       // exclude endpoint is per-thread; run sequentially to keep audit per row.
       for (const id of selectedIds) await excludeThread(id);
-      await load();
+      refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Exclude failed');
+      setActionError(e instanceof Error ? e.message : 'Exclude failed');
     } finally {
       setBusy(false);
     }
@@ -151,13 +141,13 @@ export function Staging() {
 
   async function onRunPipeline() {
     setRunning(true);
-    setError(null);
+    setActionError(null);
     setRunResult(null);
     try {
       const res = await runPipeline();
       setRunResult(res.stats);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Pipeline run failed');
+      setActionError(e instanceof Error ? e.message : 'Pipeline run failed');
     } finally {
       setRunning(false);
     }
@@ -169,7 +159,7 @@ export function Staging() {
       const res = await getThread(id);
       setPreview(res.thread);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load preview');
+      setActionError(e instanceof Error ? e.message : 'Failed to load preview');
     }
   }
 
@@ -220,7 +210,7 @@ export function Staging() {
         </div>
       )}
 
-      <Filters filters={filters} onChange={setFilters} onRefresh={load} />
+      <Filters filters={filters} onChange={setFilters} onRefresh={refresh} />
 
       {/* Instant search across all columns of the loaded threads. */}
       <div className="mb-3 flex items-center gap-2">
@@ -276,7 +266,7 @@ export function Staging() {
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {loading && threads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
             ) : sortedThreads.length === 0 ? (
               <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-400">
@@ -303,6 +293,8 @@ export function Staging() {
           </tbody>
         </table>
       </div>
+      <div ref={sentinelRef} className="h-8" />
+      {loading && threads.length > 0 && <p className="py-2 text-center text-xs text-gray-400">Loading more…</p>}
 
       {preview && <PreviewDrawer thread={preview} onClose={() => setPreview(null)} />}
     </div>

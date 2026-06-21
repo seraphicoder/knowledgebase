@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
+import { useInfinitePages } from '../lib/useInfinitePages';
 import {
   listKb,
   getKbArticle,
@@ -22,30 +23,15 @@ import { ArticleImages } from '../components/ThreadImages';
 // (semantic via pgvector, keyword fallback) and read them. Articles are published
 // here when a reviewer approves a draft.
 export function KB() {
-  const [articles, setArticles] = useState<KbArticleSummary[]>([]);
-  const [loading, setLoading] = useState(false);
+  const { items: articles, total, loading, error: loadError, sentinelRef } = useInfinitePages<KbArticleSummary>(
+    (offset, limit) => listKb({ offset, limit }).then((r) => ({ items: r.articles, total: r.total })),
+    'kb',
+  );
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<{ mode: string; results: KbSearchResult[] } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listKb();
-      setArticles(res.articles);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load articles');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   // Deep-link: /kb?article=<id> opens that article (e.g. from a Review warning).
   const [searchParams] = useSearchParams();
@@ -118,8 +104,8 @@ export function KB() {
         )}
       </form>
 
-      {error && (
-        <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      {(error ?? loadError) && (
+        <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error ?? loadError}</div>
       )}
 
       {results ? (
@@ -139,6 +125,9 @@ export function KB() {
                       {r.similarity != null && (
                         <span className="text-xs text-gray-400">{Math.round(r.similarity * 100)}% match</span>
                       )}
+                      {r.needs_update && (
+                        <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800">⚠ needs update</span>
+                      )}
                     </div>
                     <p className="mt-1 line-clamp-2 text-sm text-gray-600">{snippet(r.body)}</p>
                   </button>
@@ -149,7 +138,7 @@ export function KB() {
         </div>
       ) : (
         <div>
-          <h2 className="mb-2 text-sm font-medium text-gray-700">All articles ({articles.length})</h2>
+          <h2 className="mb-2 text-sm font-medium text-gray-700">All articles ({total})</h2>
           <div className="overflow-hidden rounded border border-gray-200">
             <table className="w-full text-left text-sm">
               <thead className="bg-gray-50 text-gray-600">
@@ -161,7 +150,7 @@ export function KB() {
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
+                {loading && articles.length === 0 ? (
                   <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
                 ) : articles.length === 0 ? (
                   <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">No published articles yet. Approve drafts in Review to publish them here.</td></tr>
@@ -183,6 +172,8 @@ export function KB() {
               </tbody>
             </table>
           </div>
+          <div ref={sentinelRef} className="h-8" />
+          {loading && articles.length > 0 && <p className="py-2 text-center text-xs text-gray-400">Loading more…</p>}
         </div>
       )}
 

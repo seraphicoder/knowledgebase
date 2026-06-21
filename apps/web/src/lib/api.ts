@@ -52,14 +52,22 @@ export interface StagedFilters {
   q?: string;
 }
 
+export interface Page {
+  limit?: number;
+  offset?: number;
+}
+
 export function listStaged(
   filters: StagedFilters = {},
+  page: Page = {},
 ): Promise<{ threads: StagedThread[]; total: number }> {
   const params = new URLSearchParams();
   if (filters.sourceId) params.set('source_id', filters.sourceId);
   if (filters.from) params.set('from', filters.from);
   if (filters.to) params.set('to', filters.to);
   if (filters.q) params.set('q', filters.q);
+  if (page.limit != null) params.set('limit', String(page.limit));
+  if (page.offset != null) params.set('offset', String(page.offset));
   const qs = params.toString();
   return request(`/api/threads/staged${qs ? `?${qs}` : ''}`);
 }
@@ -98,8 +106,12 @@ export interface QueuedThread extends StagedThread {
 
 // Backend route stays /threads/approved (DB column is approval_status); the UI
 // calls these "queued".
-export function listQueued(): Promise<{ threads: QueuedThread[]; total: number }> {
-  return request('/api/threads/approved');
+export function listQueued(page: Page = {}): Promise<{ threads: QueuedThread[]; total: number }> {
+  const params = new URLSearchParams();
+  if (page.limit != null) params.set('limit', String(page.limit));
+  if (page.offset != null) params.set('offset', String(page.offset));
+  const qs = params.toString();
+  return request(`/api/threads/approved${qs ? `?${qs}` : ''}`);
 }
 
 export function approveBatch(threadIds: string[]): Promise<{ approved: number }> {
@@ -164,8 +176,12 @@ export interface ExtractionEdit {
 
 export function listExtractions(
   status = 'pending_review',
+  page: Page = {},
 ): Promise<{ extractions: Extraction[]; total: number }> {
-  return request(`/api/extractions?status=${encodeURIComponent(status)}`);
+  const params = new URLSearchParams({ status });
+  if (page.limit != null) params.set('limit', String(page.limit));
+  if (page.offset != null) params.set('offset', String(page.offset));
+  return request(`/api/extractions?${params.toString()}`);
 }
 
 export function getExtraction(
@@ -320,10 +336,15 @@ export interface KbSearchResult {
   title: string;
   body: string;
   similarity: number | null;
+  needs_update: boolean;
 }
 
-export function listKb(): Promise<{ articles: KbArticleSummary[]; total: number }> {
-  return request('/api/kb');
+export function listKb(page: Page = {}): Promise<{ articles: KbArticleSummary[]; total: number }> {
+  const params = new URLSearchParams();
+  if (page.limit != null) params.set('limit', String(page.limit));
+  if (page.offset != null) params.set('offset', String(page.offset));
+  const qs = params.toString();
+  return request(`/api/kb${qs ? `?${qs}` : ''}`);
 }
 
 export function getKbArticle(
