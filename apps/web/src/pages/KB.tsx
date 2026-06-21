@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import {
   listKb,
   getKbArticle,
@@ -40,6 +40,13 @@ export function KB() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Deep-link: /kb?article=<id> opens that article (e.g. from a Review warning).
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    const a = searchParams.get('article');
+    if (a) setOpenId(a);
+  }, [searchParams]);
 
   async function onSearch(e: FormEvent) {
     e.preventDefault();

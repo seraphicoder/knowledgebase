@@ -34,6 +34,7 @@ export function Review() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [similarFlags, setSimilarFlags] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -52,6 +53,30 @@ export function Review() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Flag drafts that closely match an existing published article (best-effort).
+  useEffect(() => {
+    let active = true;
+    if (items.length === 0) {
+      setSimilarFlags(new Set());
+      return;
+    }
+    Promise.all(
+      items.map(async (x) => {
+        try {
+          const r = await getExtractionSimilar(x.id);
+          return r.similar.some((s) => s.similarity >= 0.85) ? x.id : null;
+        } catch {
+          return null;
+        }
+      }),
+    ).then((ids) => {
+      if (active) setSimilarFlags(new Set(ids.filter((i): i is string => i !== null)));
+    });
+    return () => {
+      active = false;
+    };
+  }, [items]);
 
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -92,13 +117,14 @@ export function Review() {
               <th className="px-3 py-2">Category</th>
               <th className="px-3 py-2">Confidence</th>
               <th className="px-3 py-2">Tags</th>
+              <th className="px-3 py-2">Created</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
             ) : items.length === 0 ? (
-              <tr><td colSpan={4} className="px-3 py-6 text-center text-gray-400">No drafts to review. Approve threads in Staging, then run the pipeline.</td></tr>
+              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No drafts to review. Approve threads in Staging, then run the pipeline.</td></tr>
             ) : (
               items.map((x) => (
                 <tr key={x.id} className="border-t border-gray-100 hover:bg-gray-50">
@@ -106,10 +132,16 @@ export function Review() {
                     <button onClick={() => setOpenId(x.id)} className="text-left font-medium text-blue-700 hover:underline">
                       {x.title || '(untitled)'}
                     </button>
+                    {similarFlags.has(x.id) && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800" title="A similar published article exists">
+                        ⚠ similar
+                      </span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-gray-600">{x.category || '—'}</td>
                   <td className="px-3 py-2 text-gray-600">{fmtConfidence(x.confidence)}</td>
                   <td className="px-3 py-2 text-gray-600">{x.tags.slice(0, 3).join(', ')}{x.tags.length > 3 ? '…' : ''}</td>
+                  <td className="px-3 py-2 text-gray-500">{fmtDateTime(x.created_at)}</td>
                 </tr>
               ))
             )}
@@ -275,7 +307,12 @@ function ReviewDrawer({
                 </p>
                 <ul className="mt-1 space-y-0.5 text-xs">
                   {similar.map((s) => (
-                    <li key={s.id}>{Math.round(s.similarity * 100)}% — {s.title}</li>
+                    <li key={s.id}>
+                      {Math.round(s.similarity * 100)}% —{' '}
+                      <Link to={`/kb?article=${s.id}`} className="text-blue-700 underline hover:text-blue-900">
+                        {s.title}
+                      </Link>
+                    </li>
                   ))}
                 </ul>
                 {similar[0]!.similarity >= 0.9 && (
@@ -427,4 +464,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function fmtConfidence(c: number | null): string {
   if (c == null) return '—';
   return `${Math.round(c * 100)}%`;
+}
+
+function fmtDateTime(iso: string | null): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 }
