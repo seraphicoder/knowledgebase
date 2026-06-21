@@ -65,7 +65,7 @@ export function Review() {
       items.map(async (x) => {
         try {
           const r = await getExtractionSimilar(x.id);
-          return r.similar.some((s) => s.similarity >= 0.85) ? x.id : null;
+          return r.similar.some((s) => s.similarity >= 0.6) ? x.id : null;
         } catch {
           return null;
         }
