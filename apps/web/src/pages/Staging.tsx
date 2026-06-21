@@ -15,6 +15,8 @@ import {
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { ThreadImages } from '../components/ThreadImages';
+import { SourceBadge } from '../components/SourceBadge';
+import { listSourceOptions, type SourceOption } from '../lib/api';
 
 // Milestone 1 Staging Review page. Approving a thread here is the only way its
 // approval_status changes. With no pipeline runner yet, an approved thread just
@@ -36,7 +38,13 @@ export function Staging() {
   const [running, setRunning] = useState(false);
   const [runResult, setRunResult] = useState<PipelineStats | null>(null);
   const [search, setSearch] = useState('');
+  const [sourceOptions, setSourceOptions] = useState<SourceOption[]>([]);
   const error = loadError ?? actionError;
+
+  // Load the org's sources once to populate the source filter.
+  useEffect(() => {
+    void listSourceOptions().then((r) => setSourceOptions(r.sources)).catch(() => {});
+  }, []);
 
   // Sort lives in the server-side filters so it covers the whole dataset, not
   // just the rows already scrolled into view.
@@ -163,6 +171,7 @@ export function Staging() {
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
             <Link to="/users" className="text-gray-500 hover:underline">Users</Link>
+            <Link to="/sources" className="text-gray-500 hover:underline">Sources</Link>
             <Link to="/analytics" className="text-gray-500 hover:underline">Analytics</Link>
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Staging Review</h1>
@@ -199,7 +208,7 @@ export function Staging() {
         </div>
       )}
 
-      <Filters filters={filters} onChange={setFilters} onRefresh={refresh} />
+      <Filters filters={filters} onChange={setFilters} onRefresh={refresh} sources={sourceOptions} />
 
       {/* Server-side search over subject + participants across the whole dataset. */}
       <div className="mb-3 flex items-center gap-2">
@@ -281,7 +290,7 @@ export function Staging() {
                       </span>
                     )}
                   </td>
-                  <td className="px-3 py-2 text-gray-600">{t.source_id.slice(0, 8)}…</td>
+                  <td className="px-3 py-2 text-gray-600"><SourceBadge source={t.source} /></td>
                   <td className="px-3 py-2 text-gray-600">{t.participants.slice(0, 2).join(', ')}{t.participants.length > 2 ? '…' : ''}</td>
                   <td className="px-3 py-2 text-gray-600">{t.message_count}</td>
                   <td className="px-3 py-2 text-gray-600">{fmtDate(t.date_range_start)}</td>
@@ -303,13 +312,32 @@ function Filters({
   filters,
   onChange,
   onRefresh,
+  sources,
 }: {
   filters: StagedFilters;
   onChange: (f: StagedFilters) => void;
   onRefresh: () => void;
+  sources: SourceOption[];
 }) {
   return (
     <div className="mb-4 flex flex-wrap items-end gap-3">
+      {sources.length > 0 && (
+        <label className="text-sm">
+          <span className="mb-1 block text-gray-500">Source</span>
+          <select
+            className="rounded border border-gray-300 px-2 py-1"
+            value={filters.sourceId ?? ''}
+            onChange={(e) => onChange({ ...filters, sourceId: e.target.value || undefined })}
+          >
+            <option value="">All sources</option>
+            {sources.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.type === 'zendesk' ? 'Zendesk' : s.type === 'imap' ? 'Email' : s.type} — {s.label}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="text-sm">
         <span className="mb-1 block text-gray-500">From</span>
         <input
@@ -346,6 +374,7 @@ function PreviewDrawer({ thread, onClose }: { thread: ThreadDetail; onClose: () 
         <dl className="mb-4 space-y-1 text-sm text-gray-600">
           <div><span className="font-medium">Participants:</span> {thread.participants.join(', ')}</div>
           <div><span className="font-medium">Messages:</span> {thread.message_count}</div>
+          <div className="flex items-center gap-1"><span className="font-medium">Source:</span> <SourceBadge source={thread.source} /></div>
           <div><span className="font-medium">Status:</span> {thread.approval_status}</div>
         </dl>
         <h3 className="mb-2 text-sm font-medium text-gray-700">Cleaned content</h3>

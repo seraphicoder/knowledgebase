@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { listQueued, getThread, type QueuedThread, type ThreadDetail } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { ThreadImages } from '../components/ThreadImages';
+import { SourceBadge } from '../components/SourceBadge';
 import { useInfinitePages } from '../lib/useInfinitePages';
 
 // Queued threads leave the Staging list, so this read-only tab is where you see
@@ -102,7 +103,7 @@ export function Queued() {
                       {t.subject || '(no subject)'}
                     </button>
                   </td>
-                  <td className="px-3 py-2 text-gray-600">{t.source_id.slice(0, 8)}…</td>
+                  <td className="px-3 py-2 text-gray-600"><SourceBadge source={t.source} /></td>
                   <td className="px-3 py-2 text-gray-600">{t.participants.slice(0, 2).join(', ')}{t.participants.length > 2 ? '…' : ''}</td>
                   <td className="px-3 py-2 text-gray-600">{t.message_count}</td>
                   <td className="px-3 py-2 text-gray-600">{fmtDate(t.date_range_start)}</td>
@@ -150,6 +151,7 @@ function PreviewDrawer({ thread, onClose }: { thread: ThreadDetail; onClose: () 
         <dl className="mb-4 space-y-1 text-sm text-gray-600">
           <div><span className="font-medium">Participants:</span> {thread.participants.join(', ')}</div>
           <div><span className="font-medium">Messages:</span> {thread.message_count}</div>
+          <div className="flex items-center gap-1"><span className="font-medium">Source:</span> <SourceBadge source={thread.source} /></div>
           <div><span className="font-medium">Status:</span> {thread.approval_status}</div>
         </dl>
         <h3 className="mb-2 text-sm font-medium text-gray-700">Original cleaned content</h3>

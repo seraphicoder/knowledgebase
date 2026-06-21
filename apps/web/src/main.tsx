@@ -9,6 +9,7 @@ import { KB } from './pages/KB';
 import { Replies } from './pages/Replies';
 import { Facts } from './pages/Facts';
 import { Users } from './pages/Users';
+import { Sources } from './pages/Sources';
 import { Analytics } from './pages/Analytics';
 import { SuperAdmin } from './pages/SuperAdmin';
 import { Login } from './pages/Login';
@@ -96,6 +97,14 @@ createRoot(rootEl).render(
           element={
             <RequireAuth>
               <Users />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/sources"
+          element={
+            <RequireAuth>
+              <Sources />
             </RequireAuth>
           }
         />

@@ -28,7 +28,7 @@ staging.get('/threads/staged', async (c) => {
   let query = db
     .from('email_threads')
     .select(
-      'id, source_id, external_thread_id, subject, participants, message_count, date_range_start, date_range_end, ingested_at',
+      'id, source_id, external_thread_id, subject, participants, message_count, date_range_start, date_range_end, ingested_at, ingestion_sources(type, label)',
       { count: 'exact' },
     )
     .eq('org_id', orgId)
@@ -51,8 +51,17 @@ staging.get('/threads/staged', async (c) => {
   // them without loading any image bytes. One scoped query over the page's ids.
   const ids = (data ?? []).map((t) => t.id as string);
   const withCounts = await annotateAttachmentCounts(db, orgId, ids, data ?? []);
-  return c.json({ threads: withCounts, total: count ?? 0, limit, offset });
+  return c.json({ threads: withCounts.map(shapeSource), total: count ?? 0, limit, offset });
 });
+
+// Normalize the embedded ingestion_sources (object or array from PostgREST) into
+// a flat `source: { type, label }` and drop the raw embed.
+function shapeSource(row: Record<string, unknown>): Record<string, unknown> {
+  const embed = row.ingestion_sources as { type?: string; label?: string } | { type?: string; label?: string }[] | null;
+  const s = Array.isArray(embed) ? embed[0] : embed;
+  const { ingestion_sources: _omit, ...rest } = row;
+  return { ...rest, source: s ? { type: s.type ?? null, label: s.label ?? null } : null };
+}
 
 // Whitelist of sortable columns → server-side ORDER BY. Unknown/absent sort
 // falls back to newest-conversation-first (date_range_end, then ingest order).
@@ -108,11 +117,12 @@ staging.get('/threads/approved', async (c) => {
   const limit = Math.min(Number(c.req.query('limit') ?? 200), 500);
   const offset = Number(c.req.query('offset') ?? 0);
   const search = c.req.query('q');
+  const sourceId = c.req.query('source_id');
 
   let query = db
     .from('email_threads')
     .select(
-      'id, source_id, external_thread_id, subject, participants, message_count, date_range_start, date_range_end, ingested_at, approved_at, processing_status',
+      'id, source_id, external_thread_id, subject, participants, message_count, date_range_start, date_range_end, ingested_at, approved_at, processing_status, ingestion_sources(type, label)',
       { count: 'exact' },
     )
     .eq('org_id', orgId)
@@ -121,10 +131,11 @@ staging.get('/threads/approved', async (c) => {
     .order('approved_at', { ascending: false })
     .range(offset, offset + limit - 1);
   if (search) query = query.ilike('search_text', `%${search}%`);
+  if (sourceId) query = query.eq('source_id', sourceId);
 
   const { data, error, count } = await query;
   if (error) return c.json({ error: error.message }, 500);
-  return c.json({ threads: data ?? [], total: count ?? 0, limit, offset });
+  return c.json({ threads: (data ?? []).map(shapeSource), total: count ?? 0, limit, offset });
 });
 
 // ─── GET /api/threads/:id — preview cleaned content ─────────
@@ -133,12 +144,12 @@ staging.get('/threads/:id', async (c) => {
   const db = getServiceClient();
   const { data, error } = await db
     .from('email_threads')
-    .select('id, subject, participants, message_count, raw_content, date_range_start, date_range_end, approval_status, source_id')
+    .select('id, subject, participants, message_count, raw_content, date_range_start, date_range_end, approval_status, source_id, ingestion_sources(type, label)')
     .eq('org_id', orgId)
     .eq('id', c.req.param('id'))
     .single();
   if (error || !data) return c.json({ error: 'Thread not found' }, 404);
-  return c.json({ thread: data });
+  return c.json({ thread: shapeSource(data as Record<string, unknown>) });
 });
 
 // ─── GET /api/threads/:id/attachments — images w/ signed URLs ──

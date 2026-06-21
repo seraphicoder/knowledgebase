@@ -48,6 +48,14 @@ npm run typecheck                # all workspaces
 
 ### Ingesting data (no AI keys required)
 
+Sources can be managed two ways:
+
+- **In-app (admins)** — the **Sources** page (`/sources`) connects Zendesk and email
+  (IMAP) sources, encrypts credentials server-side, tests the connection, and pulls from
+  **all active sources together** ("Pull new tickets", backgrounded). Each ticket records
+  which source it came from; Staging/Queued show a **Zendesk/Email badge** and a source filter.
+- **CLI** (below) — for scripted/local runs.
+
 First, store encrypted credentials on a seeded source (reads them from `.env`,
 encrypts the secrets, writes them to `ingestion_sources.config`, and verifies the
 connection):

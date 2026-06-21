@@ -16,6 +16,12 @@ export interface StagedThread {
   date_range_end: string | null;
   ingested_at: string;
   attachment_count?: number;
+  source?: TicketSource | null;
+}
+
+export interface TicketSource {
+  type: string; // 'zendesk' | 'imap' | ...
+  label: string | null;
 }
 
 export interface ThreadDetail {
@@ -28,6 +34,7 @@ export interface ThreadDetail {
   date_range_end: string | null;
   approval_status: string;
   source_id: string;
+  source?: TicketSource | null;
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -114,9 +121,11 @@ export interface QueuedThread extends StagedThread {
 export function listQueued(
   page: Page = {},
   q?: string,
+  sourceId?: string,
 ): Promise<{ threads: QueuedThread[]; total: number }> {
   const params = new URLSearchParams();
   if (q) params.set('q', q);
+  if (sourceId) params.set('source_id', sourceId);
   if (page.limit != null) params.set('limit', String(page.limit));
   if (page.offset != null) params.set('offset', String(page.offset));
   const qs = params.toString();
@@ -582,4 +591,68 @@ export function reviewSuggestion(
   },
 ): Promise<{ ok: boolean; verifiedPairId: string | null }> {
   return request(`/api/suggestions/${id}/review`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+// ─── Ingestion sources ──────────────────────────────────────
+export interface SourceOption {
+  id: string;
+  type: string;
+  label: string;
+}
+
+export interface IngestionSource {
+  id: string;
+  type: 'zendesk' | 'imap';
+  label: string;
+  status: 'active' | 'paused' | 'error';
+  last_synced_at: string | null;
+  backfill_complete: boolean;
+  created_at: string;
+  connection: Record<string, unknown>; // plaintext fields only (no secrets)
+  configured: boolean;
+}
+
+// Lightweight list for filter dropdowns (any org member).
+export function listSourceOptions(): Promise<{ sources: SourceOption[] }> {
+  return request('/api/sources/options');
+}
+
+export function listSources(): Promise<{ sources: IngestionSource[] }> {
+  return request('/api/sources');
+}
+
+export type CreateSourceInput =
+  | { type: 'zendesk'; label: string; subdomain: string; email: string; apiToken: string }
+  | { type: 'imap'; label: string; host: string; port?: number; mailbox?: string; user: string; password: string };
+
+export function createSource(input: CreateSourceInput): Promise<{ id: string }> {
+  return request('/api/sources', { method: 'POST', body: JSON.stringify(input) });
+}
+
+export function updateSource(id: string, patch: Record<string, unknown>): Promise<{ ok: boolean }> {
+  return request(`/api/sources/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+}
+
+export function deleteSource(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/sources/${id}`, { method: 'DELETE' });
+}
+
+export function testSource(id: string): Promise<{ ok: boolean; error?: string }> {
+  return request(`/api/sources/${id}/test`, { method: 'POST' });
+}
+
+export interface IngestStats {
+  sources: number;
+  inserted: number;
+  duplicates: number;
+  errored: number;
+  perSource?: { id: string; type: string; inserted?: number; duplicates?: number; backfillComplete?: boolean; error?: string }[];
+}
+
+export function ingestAllSources(limit?: number): Promise<{ ok: boolean; started: boolean; alreadyRunning?: boolean }> {
+  return request('/api/sources/ingest', { method: 'POST', body: JSON.stringify(limit != null ? { limit } : {}) });
+}
+
+export function getIngestStatus(): Promise<{ running: boolean; lastFinished: { stats: IngestStats; at: string } | null }> {
+  return request('/api/sources/ingest/status');
 }

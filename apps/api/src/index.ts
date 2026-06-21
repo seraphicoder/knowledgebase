@@ -14,6 +14,7 @@ import { users } from './routes/users.js';
 import { identity } from './routes/identity.js';
 import { platform } from './routes/platform.js';
 import { analytics } from './routes/analytics.js';
+import { sources } from './routes/sources.js';
 import { env } from './lib/env.js';
 import { log } from './lib/logger.js';
 
@@ -43,6 +44,7 @@ app.route('/api', facts);
 app.route('/api', kb);
 app.route('/api', tickets);
 app.route('/api', users);
+app.route('/api', sources);
 app.route('/api', platform);
 app.route('/api', analytics);
 

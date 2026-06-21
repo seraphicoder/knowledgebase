@@ -86,6 +86,7 @@ export function Users() {
             <Link to="/replies" className="text-gray-500 hover:underline">Reply Agent</Link>
             <Link to="/facts" className="text-gray-500 hover:underline">Domain Facts</Link>
             <span className="font-medium text-gray-900">Users</span>
+            <Link to="/sources" className="text-gray-500 hover:underline">Sources</Link>
             <Link to="/analytics" className="text-gray-500 hover:underline">Analytics</Link>
             {isPlatformAdmin && <Link to="/admin" className="text-indigo-600 hover:underline">Platform</Link>}
           </nav>
