@@ -11,6 +11,8 @@ analytics.use('*', requireAuth);
 const since30 = () => new Date(Date.now() - 30 * 86_400_000).toISOString();
 
 analytics.get('/analytics/overview', async (c) => {
+  // Admin-only: members should not see org analytics. Data is scoped to the
+  // caller's org via requireAuth, never from client input.
   const { orgId, role } = c.get('auth');
   if (role !== 'admin') return c.json({ error: 'Admin access required' }, 403);
   const db = getServiceClient();
