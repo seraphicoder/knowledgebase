@@ -10,7 +10,10 @@ import { provisionUser } from '../lib/provision.js';
 // Gated by requirePlatformAdmin (independent of org membership).
 
 export const platform = new Hono<{ Variables: { platformUserId: string } }>();
-platform.use('*', requirePlatformAdmin);
+// IMPORTANT: scope to /platform/* — all routers mount at /api, so a `use('*')`
+// here registers as /api/* and would leak onto sibling routes (e.g. analytics),
+// blocking non-platform admins. Scoping keeps the guard on platform paths only.
+platform.use('/platform/*', requirePlatformAdmin);
 
 const PLANS = ['starter', 'pro', 'enterprise'] as const;
 

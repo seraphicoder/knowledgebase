@@ -32,6 +32,10 @@ app.use(
 );
 app.get('/health', (c) => c.json({ status: 'ok', service: 'mailmind-api' }));
 
+// identity (/me) is mounted first so its handler resolves before any sibling
+// router's `use('*')` auth middleware can run on it — /me does its own token
+// check and must work for vendor-only platform admins that have no org profile.
+app.route('/api', identity);
 app.route('/api', staging);
 app.route('/api', pipeline);
 app.route('/api', review);
@@ -39,7 +43,6 @@ app.route('/api', facts);
 app.route('/api', kb);
 app.route('/api', tickets);
 app.route('/api', users);
-app.route('/api', identity);
 app.route('/api', platform);
 app.route('/api', analytics);
 
