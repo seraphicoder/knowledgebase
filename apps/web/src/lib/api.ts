@@ -181,6 +181,16 @@ export interface PublishImageInput {
   editedDataUrl?: string | null;
 }
 
+export interface SimilarArticle {
+  id: string;
+  title: string;
+  similarity: number;
+}
+
+export function getExtractionSimilar(id: string): Promise<{ similar: SimilarArticle[] }> {
+  return request(`/api/extractions/${id}/similar`);
+}
+
 export function approveExtraction(
   id: string,
   images?: PublishImageInput[],

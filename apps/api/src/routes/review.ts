@@ -63,6 +63,39 @@ review.get('/extractions/:id', async (c) => {
   return c.json({ extraction: data, thread });
 });
 
+// ─── GET /api/extractions/:id/similar — near-duplicate KB articles ──
+// Uses the draft's stored embedding (no new AI call) to surface published
+// articles a reviewer might be duplicating.
+review.get('/extractions/:id/similar', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId } = c.get('auth');
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing id' }, 400);
+  const db = getServiceClient();
+
+  const { data: ex, error } = await db
+    .from('extractions')
+    .select('embedding')
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .single();
+  if (error || !ex) return c.json({ error: 'Extraction not found' }, 404);
+  if (!ex.embedding) return c.json({ similar: [] });
+
+  const { data, error: mErr } = await db.rpc('match_kb_articles', {
+    p_org_id: orgId,
+    p_query_embedding: ex.embedding as unknown as string, // stored pgvector text form
+    p_match_count: 5,
+  });
+  if (mErr) return c.json({ error: mErr.message }, 500);
+
+  const similar = ((data ?? []) as { id: string; title: string; similarity: number }[]).map((a) => ({
+    id: a.id,
+    title: a.title,
+    similarity: a.similarity,
+  }));
+  return c.json({ similar });
+});
+
 // ─── PATCH /api/extractions/:id — edit the draft ────────────
 const editSchema = z
   .object({

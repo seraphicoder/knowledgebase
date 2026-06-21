@@ -7,11 +7,13 @@ import {
   approveExtraction,
   rejectExtraction,
   listThreadAttachments,
+  getExtractionSimilar,
   type Extraction,
   type ExtractionSourceThread,
   type ExtractionEdit,
   type ThreadAttachment,
   type PublishImageInput,
+  type SimilarArticle,
 } from '../lib/api';
 import { supabase } from '../lib/supabase';
 import { Lightbox } from '../components/Lightbox';
@@ -146,6 +148,7 @@ function ReviewDrawer({
   const [choices, setChoices] = useState<Record<string, ImageChoice>>({});
   const [editing, setEditing] = useState<{ id: string; source: string } | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
+  const [similar, setSimilar] = useState<SimilarArticle[]>([]);
 
   useEffect(() => {
     let active = true;
@@ -163,6 +166,10 @@ function ReviewDrawer({
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load draft'));
+    // Surface near-duplicate published articles (best-effort).
+    getExtractionSimilar(id)
+      .then((r) => active && setSimilar(r.similar.filter((s) => s.similarity >= 0.6)))
+      .catch(() => active && setSimilar([]));
     return () => {
       active = false;
     };
@@ -261,6 +268,22 @@ function ReviewDrawer({
           <p className="text-sm text-gray-400">Loading…</p>
         ) : (
           <div className="space-y-4">
+            {similar.length > 0 && (
+              <div className={`rounded border px-3 py-2 text-sm ${similar[0]!.similarity >= 0.9 ? 'border-amber-300 bg-amber-50 text-amber-900' : 'border-gray-200 bg-gray-50 text-gray-700'}`}>
+                <p className="font-medium">
+                  {similar[0]!.similarity >= 0.9 ? '⚠ Possible duplicate — very similar to an existing article' : 'Similar existing articles'}
+                </p>
+                <ul className="mt-1 space-y-0.5 text-xs">
+                  {similar.map((s) => (
+                    <li key={s.id}>{Math.round(s.similarity * 100)}% — {s.title}</li>
+                  ))}
+                </ul>
+                {similar[0]!.similarity >= 0.9 && (
+                  <p className="mt-1 text-xs">Consider rejecting this draft and editing the existing article instead.</p>
+                )}
+              </div>
+            )}
+
             <Field label="Title">
               <input className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm" value={draft.title ?? ''} onChange={(e) => set('title', e.target.value)} />
             </Field>
