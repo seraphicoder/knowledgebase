@@ -9,6 +9,7 @@ import { KB } from './pages/KB';
 import { Replies } from './pages/Replies';
 import { Facts } from './pages/Facts';
 import { Users } from './pages/Users';
+import { SuperAdmin } from './pages/SuperAdmin';
 import { Login } from './pages/Login';
 import { useSession } from './lib/useSession';
 
@@ -94,6 +95,14 @@ createRoot(rootEl).render(
           element={
             <RequireAuth>
               <Users />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <RequireAuth>
+              <SuperAdmin />
             </RequireAuth>
           }
         />

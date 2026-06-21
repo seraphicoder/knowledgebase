@@ -11,6 +11,8 @@ import { facts } from './routes/facts.js';
 import { kb } from './routes/kb.js';
 import { tickets } from './routes/tickets.js';
 import { users } from './routes/users.js';
+import { identity } from './routes/identity.js';
+import { platform } from './routes/platform.js';
 import { env } from './lib/env.js';
 import { log } from './lib/logger.js';
 
@@ -24,7 +26,7 @@ app.use(
   cors({
     origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
     allowHeaders: ['Authorization', 'Content-Type'],
-    allowMethods: ['GET', 'POST', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
   }),
 );
 app.get('/health', (c) => c.json({ status: 'ok', service: 'mailmind-api' }));
@@ -36,6 +38,8 @@ app.route('/api', facts);
 app.route('/api', kb);
 app.route('/api', tickets);
 app.route('/api', users);
+app.route('/api', identity);
+app.route('/api', platform);
 
 // Single-service deploy: serve the built SPA same-origin from this server.
 // Only mounted when a build is present (it isn't in local dev — use the Vite

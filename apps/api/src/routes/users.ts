@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
+import { provisionUser } from '../lib/provision.js';
 
 // User & role management. Admin-only. Manages roles of EXISTING users in the org
 // (users are created via Supabase Auth + linked in public.users). Every role
@@ -13,12 +14,6 @@ export const users = new Hono<{ Variables: AuthVars }>();
 users.use('*', requireAuth);
 
 const ROLES = ['admin', 'reviewer', 'sme', 'member', 'viewer'] as const;
-
-// ─── GET /api/me — current user's identity + role ───────────
-users.get('/me', (c) => {
-  const { userId, orgId, role } = c.get('auth');
-  return c.json({ userId, orgId, role });
-});
 
 // ─── GET /api/users — list org members (admin) ──────────────
 users.get('/users', async (c) => {
@@ -70,4 +65,35 @@ users.patch('/users/:id', async (c: Context<{ Variables: AuthVars }>) => {
     metadata: { from: target.role, to: parsed.data.role },
   });
   return c.json({ ok: true });
+});
+
+// ─── POST /api/users/invite — add a teammate (admin) ────────
+// Creates a pre-confirmed account in the admin's org and returns a one-time temp
+// password to hand off (no email is sent). The teammate signs in immediately.
+const inviteSchema = z.object({
+  email: z.string().email(),
+  role: z.enum(ROLES).default('member'),
+});
+
+users.post('/users/invite', async (c) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (role !== 'admin') return c.json({ error: 'Admin access required' }, 403);
+  const parsed = inviteSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, 400);
+
+  const db = getServiceClient();
+  try {
+    const { userId: newId, tempPassword } = await provisionUser(db, {
+      email: parsed.data.email,
+      orgId,
+      role: parsed.data.role,
+    });
+    await writeAudit({
+      orgId, userId, action: 'user.invited', resource: 'users', resourceId: newId,
+      metadata: { email: parsed.data.email.toLowerCase(), role: parsed.data.role },
+    });
+    return c.json({ userId: newId, email: parsed.data.email.toLowerCase(), tempPassword });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : 'Failed to invite user' }, 400);
+  }
 });

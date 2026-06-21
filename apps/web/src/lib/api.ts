@@ -363,7 +363,15 @@ export interface OrgUser {
   created_at: string;
 }
 
-export function getMe(): Promise<{ userId: string; orgId: string; role: UserRole }> {
+export interface Identity {
+  userId: string;
+  email: string | null;
+  org: { id: string; name: string | null; suspended: boolean } | null;
+  role: UserRole | null;
+  isPlatformAdmin: boolean;
+}
+
+export function getMe(): Promise<Identity> {
   return request('/api/me');
 }
 
@@ -373,6 +381,42 @@ export function listUsers(): Promise<{ users: OrgUser[] }> {
 
 export function updateUserRole(id: string, role: UserRole): Promise<{ ok: boolean }> {
   return request(`/api/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role }) });
+}
+
+// Returns a one-time temp password to hand off to the new teammate.
+export function inviteUser(
+  email: string,
+  role: UserRole,
+): Promise<{ userId: string; email: string; tempPassword: string }> {
+  return request('/api/users/invite', { method: 'POST', body: JSON.stringify({ email, role }) });
+}
+
+// ─── Platform (vendor super-admin) ──────────────────────────
+export interface PlatformOrg {
+  id: string;
+  name: string;
+  plan: 'starter' | 'pro' | 'enterprise';
+  suspended: boolean;
+  created_at: string;
+  user_count: number;
+  thread_count: number;
+  article_count: number;
+}
+
+export function listOrgs(): Promise<{ orgs: PlatformOrg[] }> {
+  return request('/api/platform/orgs');
+}
+
+export function createOrg(
+  name: string,
+  adminEmail: string,
+  plan: PlatformOrg['plan'] = 'starter',
+): Promise<{ org: PlatformOrg; adminEmail: string; tempPassword: string }> {
+  return request('/api/platform/orgs', { method: 'POST', body: JSON.stringify({ name, adminEmail, plan }) });
+}
+
+export function setOrgSuspended(id: string, suspended: boolean): Promise<{ ok: boolean; suspended: boolean }> {
+  return request(`/api/platform/orgs/${id}`, { method: 'PATCH', body: JSON.stringify({ suspended }) });
 }
 
 export interface KbSearchResult {

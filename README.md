@@ -24,7 +24,7 @@ apps/
   web/                 # React + Vite + Tailwind
     src/pages/         # Login, Staging, Approved, Review, KB, Replies, Facts
     src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text · 016 platform admins + org suspend
 ```
 
 ## Setup
@@ -81,6 +81,24 @@ overlap between batches is absorbed by dedup on `(org_id, source_id, external_th
 - **Append-only audit log** — every create/update/delete/export writes to `audit_log`; no UPDATE/DELETE policy exists, so rows are immutable. Admins can read their org's log; the backend reads via the service role.
 - **Encrypted credentials** — source secrets stored in `ingestion_sources.config` are AES-256-GCM encrypted at the app layer ([`lib/crypto.ts`](apps/api/src/lib/crypto.ts)).
 - **No secrets in source** — everything via `.env` (git-ignored); `.env.example` documents every variable.
+
+## Onboarding & roles (multi-tenant)
+
+Orgs are **vendor-provisioned**: a platform super-admin creates each organization
+and its first admin from the in-app **Platform** console (`/admin`). Org admins
+then **invite teammates by email** from **Users** (`/users`) — invited accounts are
+pre-confirmed (instant access, no verification email) and the admin is shown a
+**one-time temp password** to hand off. Suspending an org (Platform console) blocks
+all its users at the auth layer.
+
+Bootstrap the **first** platform admin once via SQL (there's no UI for it — it's you):
+
+```sql
+insert into platform_admins (user_id)
+values ('<your-auth-user-uuid>');  -- from auth.users
+```
+
+That account can then sign in and create orgs without touching the database again.
 
 ## Deployment — single Railway service
 
