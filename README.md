@@ -24,7 +24,7 @@ apps/
   web/                 # React + Vite + Tailwind
     src/pages/         # Login, Staging, Approved, Review, KB, Replies, Facts
     src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text · 016 platform admins + org suspend
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text · 016 platform admins + org suspend · 017 ai_usage + analytics RPCs
 ```
 
 ## Setup
@@ -99,6 +99,22 @@ values ('<your-auth-user-uuid>');  -- from auth.users
 ```
 
 That account can then sign in and create orgs without touching the database again.
+
+## Analytics
+
+Two split views (customers never see the vendor's costs):
+
+- **Org dashboard** (`/analytics`, org admins) — reply-agent **deflection rate**, suggestion
+  outcomes, KB/verified-pair counts, ticket pipeline status, and 30-day ingestion. No cost data.
+- **Platform console** (`/admin`, vendor) — cross-org **AI token usage** (raw input/output
+  counts by model, 30-day + all-time), **storage** (summed attachment bytes), and ingestion,
+  with a per-org breakdown.
+
+Every model call records token counts to `ai_usage` via the recording wrappers in
+[`lib/ai.ts`](apps/api/src/lib/ai.ts) (`createMessage`/`createEmbedding`); org attribution is
+carried through [`lib/ai-usage.ts`](apps/api/src/lib/ai-usage.ts)'s `withOrg` context set at each
+pipeline-run / request boundary. Tokens are stored raw (no dollar conversion) — this is the
+measurement layer that later **usage gates** (storage / token / egress caps) will build on.
 
 ## Deployment — single Railway service
 

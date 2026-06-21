@@ -1,4 +1,4 @@
-import { getAnthropic, MODELS } from '../lib/ai.js';
+import { createMessage, MODELS } from '../lib/ai.js';
 import { withRetry, isRetryableHttpStatus } from '../lib/retry.js';
 import { extractJson } from './relevance-scorer.js';
 
@@ -41,12 +41,15 @@ export async function mergeArticle(
 
   const res = await withRetry(
     () =>
-      getAnthropic().messages.create({
-        model: MODELS.extraction,
-        max_tokens: 4000,
-        system: SYSTEM,
-        messages: [{ role: 'user', content: user.slice(0, 30000) }],
-      }),
+      createMessage(
+        {
+          model: MODELS.extraction,
+          max_tokens: 4000,
+          system: SYSTEM,
+          messages: [{ role: 'user', content: user.slice(0, 30000) }],
+        },
+        'merge',
+      ),
     {
       label: 'anthropic.merge',
       maxAttempts: 3,

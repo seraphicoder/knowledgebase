@@ -1,5 +1,6 @@
 import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
+import { withOrg } from '../lib/ai-usage.js';
 import { log } from '../lib/logger.js';
 import { embedText, toVector } from './embedder.js';
 import { scoreRelevance, RELEVANCE_THRESHOLD } from './relevance-scorer.js';
@@ -26,7 +27,12 @@ export interface PipelineStats {
   errored: number;
 }
 
-export async function runPipeline(orgId: string): Promise<PipelineStats> {
+export function runPipeline(orgId: string): Promise<PipelineStats> {
+  // Attribute all AI token usage in this run to the org.
+  return withOrg(orgId, () => runPipelineImpl(orgId));
+}
+
+async function runPipelineImpl(orgId: string): Promise<PipelineStats> {
   const db = getServiceClient();
   const stats: PipelineStats = {
     considered: 0, embedded: 0, skippedLowRelevance: 0, skippedDuplicate: 0,

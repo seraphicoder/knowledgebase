@@ -1,4 +1,4 @@
-import { getAnthropic, MODELS } from '../lib/ai.js';
+import { createMessage, MODELS } from '../lib/ai.js';
 import { withRetry, isRetryableHttpStatus } from '../lib/retry.js';
 
 // Haiku relevance gate. Decides whether a thread contains a question + an
@@ -21,12 +21,15 @@ No markdown, no preamble.`;
 export async function scoreRelevance(cleanedContent: string): Promise<RelevanceResult> {
   const res = await withRetry(
     () =>
-      getAnthropic().messages.create({
-        model: MODELS.relevance,
-        max_tokens: 200,
-        system: SYSTEM,
-        messages: [{ role: 'user', content: cleanedContent.slice(0, 12000) }],
-      }),
+      createMessage(
+        {
+          model: MODELS.relevance,
+          max_tokens: 200,
+          system: SYSTEM,
+          messages: [{ role: 'user', content: cleanedContent.slice(0, 12000) }],
+        },
+        'relevance',
+      ),
     {
       label: 'anthropic.relevance',
       maxAttempts: 3,

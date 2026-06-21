@@ -13,6 +13,7 @@ import { tickets } from './routes/tickets.js';
 import { users } from './routes/users.js';
 import { identity } from './routes/identity.js';
 import { platform } from './routes/platform.js';
+import { analytics } from './routes/analytics.js';
 import { env } from './lib/env.js';
 import { log } from './lib/logger.js';
 
@@ -40,6 +41,7 @@ app.route('/api', tickets);
 app.route('/api', users);
 app.route('/api', identity);
 app.route('/api', platform);
+app.route('/api', analytics);
 
 // Single-service deploy: serve the built SPA same-origin from this server.
 // Only mounted when a build is present (it isn't in local dev — use the Vite

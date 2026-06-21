@@ -1,4 +1,4 @@
-import { getOpenAI, MODELS } from '../lib/ai.js';
+import { createEmbedding, MODELS } from '../lib/ai.js';
 import { withRetry, isRetryableHttpStatus } from '../lib/retry.js';
 
 // Generates embeddings via OpenAI text-embedding-3-small (1536 dims).
@@ -13,7 +13,7 @@ export async function embedTexts(texts: string[]): Promise<number[][]> {
   for (let i = 0; i < texts.length; i += MAX_BATCH) {
     const batch = texts.slice(i, i + MAX_BATCH);
     const res = await withRetry(
-      () => getOpenAI().embeddings.create({ model: MODELS.embedding, input: batch }),
+      () => createEmbedding({ model: MODELS.embedding, input: batch }, 'embedding'),
       {
         label: 'openai.embeddings',
         maxAttempts: 3,

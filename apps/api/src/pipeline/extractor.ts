@@ -1,4 +1,4 @@
-import { getAnthropic, MODELS } from '../lib/ai.js';
+import { createMessage, MODELS } from '../lib/ai.js';
 import { withRetry, isRetryableHttpStatus } from '../lib/retry.js';
 import { extractJson } from './relevance-scorer.js';
 
@@ -54,12 +54,15 @@ export async function extractKnowledge(
   const system = factsBlock ? `${SYSTEM}\n\n${factsBlock}` : SYSTEM;
   const res = await withRetry(
     () =>
-      getAnthropic().messages.create({
-        model: MODELS.extraction,
-        max_tokens: 4000, // room for several entries from a multi-issue thread
-        system,
-        messages: [{ role: 'user', content: cleanedContent.slice(0, 30000) }],
-      }),
+      createMessage(
+        {
+          model: MODELS.extraction,
+          max_tokens: 4000, // room for several entries from a multi-issue thread
+          system,
+          messages: [{ role: 'user', content: cleanedContent.slice(0, 30000) }],
+        },
+        'extraction',
+      ),
     {
       label: 'anthropic.extraction',
       maxAttempts: 3,

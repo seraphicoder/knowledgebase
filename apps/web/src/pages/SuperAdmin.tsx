@@ -1,7 +1,68 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listOrgs, createOrg, setOrgSuspended, type PlatformOrg } from '../lib/api';
+import { listOrgs, createOrg, setOrgSuspended, getPlatformAnalytics, type PlatformOrg, type PlatformAnalytics, type ModelUsage } from '../lib/api';
 import { supabase } from '../lib/supabase';
+
+function fmtNum(n: number): string {
+  return n.toLocaleString();
+}
+
+interface MergedModelUsage {
+  provider: string;
+  model: string;
+  input30: number; output30: number;
+  inputAll: number; outputAll: number;
+  callsAll: number;
+}
+
+// Join the 30-day and all-time per-model usage into one row per model so cost can
+// be computed for either window from the same table.
+function mergeByModel(last30: ModelUsage[], allTime: ModelUsage[]): MergedModelUsage[] {
+  const map = new Map<string, MergedModelUsage>();
+  const row = (m: ModelUsage): MergedModelUsage => {
+    const key = `${m.provider}:${m.model}`;
+    let e = map.get(key);
+    if (!e) {
+      e = { provider: m.provider, model: m.model, input30: 0, output30: 0, inputAll: 0, outputAll: 0, callsAll: 0 };
+      map.set(key, e);
+    }
+    return e;
+  };
+  for (const m of last30) {
+    const e = row(m);
+    e.input30 = m.input;
+    e.output30 = m.output;
+  }
+  for (const m of allTime) {
+    const e = row(m);
+    e.inputAll = m.input;
+    e.outputAll = m.output;
+    e.callsAll = m.calls;
+  }
+  return [...map.values()].sort((a, b) => b.inputAll + b.outputAll - (a.inputAll + a.outputAll));
+}
+
+function fmtBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(1)} ${units[i]}`;
+}
+
+function Stat({ label, value, hint }: { label: string; value: string | number; hint?: string }) {
+  return (
+    <div className="rounded border border-gray-200 bg-white p-3">
+      <div className="text-xl font-semibold text-gray-900">{value}</div>
+      <div className="text-xs text-gray-500">{label}</div>
+      {hint && <div className="mt-0.5 text-[10px] text-gray-400">{hint}</div>}
+    </div>
+  );
+}
 
 // Vendor (super-admin) console. Orgs are vendor-provisioned here: create an org +
 // its first admin, see usage, and suspend/reactivate. Access is gated server-side
@@ -12,6 +73,7 @@ export function SuperAdmin() {
   const [denied, setDenied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [stats, setStats] = useState<PlatformAnalytics | null>(null);
 
   // Create-org form.
   const [name, setName] = useState('');
@@ -24,7 +86,9 @@ export function SuperAdmin() {
     setLoading(true);
     setError(null);
     try {
-      setOrgs((await listOrgs()).orgs);
+      const [orgsRes, statsRes] = await Promise.all([listOrgs(), getPlatformAnalytics()]);
+      setOrgs(orgsRes.orgs);
+      setStats(statsRes);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to load orgs';
       if (msg.toLowerCase().includes('platform admin')) setDenied(true);
@@ -131,6 +195,80 @@ export function SuperAdmin() {
               </div>
             )}
           </div>
+
+          {/* AI usage & storage (raw token counts — no $ conversion). */}
+          {stats && (
+            <div className="mb-6">
+              <h2 className="mb-2 text-sm font-medium text-gray-700">AI usage & storage</h2>
+              <div className="mb-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label="Tokens in (30d)" value={fmtNum(stats.last30.totalInput)} hint={`${fmtNum(stats.allTime.totalInput)} all-time`} />
+                <Stat label="Tokens out (30d)" value={fmtNum(stats.last30.totalOutput)} hint={`${fmtNum(stats.allTime.totalOutput)} all-time`} />
+                <Stat label="AI calls (30d)" value={fmtNum(stats.last30.totalCalls)} hint={`${fmtNum(stats.allTime.totalCalls)} all-time`} />
+                <Stat label="Storage" value={fmtBytes(stats.storageTotalBytes)} hint={`${fmtNum(stats.storageTotalFiles)} files`} />
+              </div>
+
+              {(() => {
+                const rows = mergeByModel(stats.last30.byModel, stats.allTime.byModel);
+                if (rows.length === 0) return null;
+                return (
+                  <div className="mb-3 overflow-hidden rounded border border-gray-200">
+                    <p className="bg-gray-50 px-3 pt-2 text-xs text-gray-500">
+                      Tokens by model — multiply by each model's input/output rate to estimate cost.
+                    </p>
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-gray-50 text-gray-600">
+                        <tr>
+                          <th className="px-3 py-2">Model</th>
+                          <th className="px-3 py-2">Input (30d)</th>
+                          <th className="px-3 py-2">Output (30d)</th>
+                          <th className="px-3 py-2">Input (all)</th>
+                          <th className="px-3 py-2">Output (all)</th>
+                          <th className="px-3 py-2">Calls (all)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((m) => (
+                          <tr key={`${m.provider}:${m.model}`} className="border-t border-gray-100">
+                            <td className="px-3 py-2 text-gray-700">{m.model} <span className="text-xs text-gray-400">({m.provider})</span></td>
+                            <td className="px-3 py-2 text-gray-600">{fmtNum(m.input30)}</td>
+                            <td className="px-3 py-2 text-gray-600">{fmtNum(m.output30)}</td>
+                            <td className="px-3 py-2 text-gray-600">{fmtNum(m.inputAll)}</td>
+                            <td className="px-3 py-2 text-gray-600">{fmtNum(m.outputAll)}</td>
+                            <td className="px-3 py-2 text-gray-600">{fmtNum(m.callsAll)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+
+              <div className="overflow-hidden rounded border border-gray-200">
+                <table className="w-full text-left text-sm">
+                  <thead className="bg-gray-50 text-gray-600">
+                    <tr>
+                      <th className="px-3 py-2">Org</th>
+                      <th className="px-3 py-2">Tokens (30d)</th>
+                      <th className="px-3 py-2">Tokens (all)</th>
+                      <th className="px-3 py-2">Storage</th>
+                      <th className="px-3 py-2">Threads (30d)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {stats.byOrg.map((o) => (
+                      <tr key={o.id} className="border-t border-gray-100">
+                        <td className="px-3 py-2 font-medium text-gray-800">{o.name}</td>
+                        <td className="px-3 py-2 text-gray-600">{fmtNum(o.input30 + o.output30)}</td>
+                        <td className="px-3 py-2 text-gray-600">{fmtNum(o.inputAll + o.outputAll)}</td>
+                        <td className="px-3 py-2 text-gray-600">{fmtBytes(o.storageBytes)}</td>
+                        <td className="px-3 py-2 text-gray-600">{fmtNum(o.threads30)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
 
           <h2 className="mb-2 text-sm font-medium text-gray-700">Organizations ({orgs.length})</h2>
           <div className="overflow-hidden rounded border border-gray-200">

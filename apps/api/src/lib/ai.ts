@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
 import { requireAiEnv } from './env.js';
+import { recordUsage } from './ai-usage.js';
 
 // Lazily-constructed AI clients. requireAiEnv() throws if keys are missing, so
 // these are only ever reached on the Milestone 2 (post-approval) path — never
@@ -25,4 +26,38 @@ export function getAnthropic(): Anthropic {
 export function getOpenAI(): OpenAI {
   if (!openai) openai = new OpenAI({ apiKey: requireAiEnv().openaiApiKey });
   return openai;
+}
+
+// Recording wrappers — use these instead of the raw SDK so every call's token
+// usage is attributed (to the org in the current withOrg context). `operation`
+// labels the call site for the analytics breakdown.
+
+export async function createMessage(
+  params: Anthropic.MessageCreateParamsNonStreaming,
+  operation: string,
+): Promise<Anthropic.Message> {
+  const res = await getAnthropic().messages.create(params);
+  recordUsage({
+    provider: 'anthropic',
+    model: params.model,
+    operation,
+    inputTokens: res.usage?.input_tokens ?? 0,
+    outputTokens: res.usage?.output_tokens ?? 0,
+  });
+  return res;
+}
+
+export async function createEmbedding(
+  params: OpenAI.EmbeddingCreateParams,
+  operation: string,
+): Promise<OpenAI.CreateEmbeddingResponse> {
+  const res = await getOpenAI().embeddings.create(params);
+  recordUsage({
+    provider: 'openai',
+    model: typeof params.model === 'string' ? params.model : MODELS.embedding,
+    operation,
+    inputTokens: res.usage?.prompt_tokens ?? 0,
+    outputTokens: 0,
+  });
+  return res;
 }

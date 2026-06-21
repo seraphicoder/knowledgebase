@@ -6,6 +6,7 @@ import { requireAuth, type AuthVars } from '../lib/auth.js';
 import { publishExtraction, attachArticleImages, type ExtractionForPublish, type PublishImage } from '../pipeline/kb-publish.js';
 import { mergeArticle } from '../pipeline/kb-merge.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
+import { withOrg } from '../lib/ai-usage.js';
 
 // Milestone 3 — Review Queue. Humans qualify AI-drafted extractions before they
 // become KB articles: edit the draft, then approve or reject. Every query is
@@ -168,9 +169,11 @@ review.post('/extractions/:id/merge-preview', async (c: Context<{ Variables: Aut
   if (!article) return c.json({ error: 'Article not found' }, 404);
 
   try {
-    const merged = await mergeArticle(
-      { title: article.title as string, body: article.body as string },
-      { title: draft.title as string | null, question: draft.question as string | null, answer: draft.answer as string | null, caveats: draft.caveats as string | null },
+    const merged = await withOrg(orgId, () =>
+      mergeArticle(
+        { title: article.title as string, body: article.body as string },
+        { title: draft.title as string | null, question: draft.question as string | null, answer: draft.answer as string | null, caveats: draft.caveats as string | null },
+      ),
     );
 
     // Candidate images to combine: the article's current images + the ticket's.
@@ -246,7 +249,7 @@ review.post('/extractions/:id/merge', async (c: Context<{ Variables: AuthVars }>
   const { data: article } = await db.from('kb_articles').select('id, version').eq('org_id', orgId).eq('id', parsed.data.articleId).single();
   if (!article) return c.json({ error: 'Article not found' }, 404);
 
-  const embedding = toVector(await embedText(`${parsed.data.title}\n${parsed.data.body}`));
+  const embedding = toVector(await withOrg(orgId, () => embedText(`${parsed.data.title}\n${parsed.data.body}`)));
   const { error: upErr } = await db
     .from('kb_articles')
     .update({

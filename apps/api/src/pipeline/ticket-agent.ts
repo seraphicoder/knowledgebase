@@ -1,5 +1,6 @@
 import { getServiceClient } from '../lib/supabase.js';
-import { getAnthropic, MODELS } from '../lib/ai.js';
+import { createMessage, MODELS } from '../lib/ai.js';
+import { withOrg } from '../lib/ai-usage.js';
 import { withRetry, isRetryableHttpStatus } from '../lib/retry.js';
 import { writeAudit } from '../lib/audit.js';
 import { log } from '../lib/logger.js';
@@ -28,7 +29,15 @@ Use ONLY the provided knowledge base articles, similar past resolved threads, an
 Write a professional, concise reply that resolves the ticket. If the provided context does not actually cover the question, say you don't have enough information to answer confidently and suggest escalating to a specialist — do NOT invent product specifics.
 Return ONLY valid JSON, no markdown: {"reply": string, "confidence": number}  // confidence 0-100 that your reply is accurate and complete.`;
 
-export async function generateSuggestion(
+export function generateSuggestion(
+  orgId: string,
+  input: { threadId?: string | null; content: string },
+): Promise<SuggestionResult> {
+  // Attribute all AI token usage in here to this org.
+  return withOrg(orgId, () => generateSuggestionImpl(orgId, input));
+}
+
+async function generateSuggestionImpl(
   orgId: string,
   input: { threadId?: string | null; content: string },
 ): Promise<SuggestionResult> {
@@ -54,12 +63,15 @@ export async function generateSuggestion(
 
   const res = await withRetry(
     () =>
-      getAnthropic().messages.create({
-        model: MODELS.extraction,
-        max_tokens: 1500,
-        system: SYSTEM,
-        messages: [{ role: 'user', content: userMsg }],
-      }),
+      createMessage(
+        {
+          model: MODELS.extraction,
+          max_tokens: 1500,
+          system: SYSTEM,
+          messages: [{ role: 'user', content: userMsg }],
+        },
+        'reply',
+      ),
     {
       label: 'anthropic.ticket-reply',
       maxAttempts: 3,

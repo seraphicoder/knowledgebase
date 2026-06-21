@@ -83,6 +83,107 @@ platform.post('/platform/orgs', async (c) => {
   }
 });
 
+// ─── GET /api/platform/analytics — cross-org cost/usage ─────
+// Raw token counts (no $ conversion), storage proxy (summed attachment bytes),
+// and ingestion, both last-30-days and all-time, with a per-org breakdown.
+interface UsageRow {
+  org_id: string | null;
+  provider: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+  calls: number;
+}
+
+function summarize(rows: UsageRow[]) {
+  const byModel = new Map<string, { provider: string; model: string; input: number; output: number; calls: number }>();
+  let totalInput = 0, totalOutput = 0, totalCalls = 0;
+  for (const r of rows) {
+    const i = Number(r.input_tokens), o = Number(r.output_tokens), n = Number(r.calls);
+    totalInput += i; totalOutput += o; totalCalls += n;
+    const key = `${r.provider}:${r.model}`;
+    const e = byModel.get(key) ?? { provider: r.provider, model: r.model, input: 0, output: 0, calls: 0 };
+    e.input += i; e.output += o; e.calls += n;
+    byModel.set(key, e);
+  }
+  return {
+    totalInput, totalOutput, totalCalls,
+    byModel: [...byModel.values()].sort((a, b) => b.input + b.output - (a.input + a.output)),
+  };
+}
+
+function perOrgUsage(rows: UsageRow[]): Map<string, { input: number; output: number; calls: number }> {
+  const m = new Map<string, { input: number; output: number; calls: number }>();
+  for (const r of rows) {
+    if (!r.org_id) continue;
+    const e = m.get(r.org_id) ?? { input: 0, output: 0, calls: 0 };
+    e.input += Number(r.input_tokens); e.output += Number(r.output_tokens); e.calls += Number(r.calls);
+    m.set(r.org_id, e);
+  }
+  return m;
+}
+
+platform.get('/platform/analytics', async (c) => {
+  const db = getServiceClient();
+  const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+
+  const [orgsRes, u30, uAll, storage, i30, iAll] = await Promise.all([
+    db.from('organizations').select('id, name'),
+    db.rpc('ai_usage_summary', { p_since: since }),
+    db.rpc('ai_usage_summary', {}),
+    db.rpc('storage_by_org', {}),
+    db.rpc('ingestion_by_org', { p_since: since }),
+    db.rpc('ingestion_by_org', {}),
+  ]);
+
+  const rows30 = (u30.data ?? []) as UsageRow[];
+  const rowsAll = (uAll.data ?? []) as UsageRow[];
+  const usage30 = perOrgUsage(rows30);
+  const usageAll = perOrgUsage(rowsAll);
+  const storageMap = new Map<string, { bytes: number; files: number }>(
+    ((storage.data ?? []) as { org_id: string; bytes: number; files: number }[]).map(
+      (s) => [s.org_id, { bytes: Number(s.bytes), files: Number(s.files) }] as [string, { bytes: number; files: number }],
+    ),
+  );
+  const ing30 = new Map<string, number>(
+    ((i30.data ?? []) as { org_id: string; threads: number }[]).map((r) => [r.org_id, Number(r.threads)] as [string, number]),
+  );
+  const ingAll = new Map<string, number>(
+    ((iAll.data ?? []) as { org_id: string; threads: number }[]).map((r) => [r.org_id, Number(r.threads)] as [string, number]),
+  );
+
+  const byOrg = ((orgsRes.data ?? []) as { id: string; name: string }[]).map((o) => {
+    const u30o = usage30.get(o.id) ?? { input: 0, output: 0, calls: 0 };
+    const uAllo = usageAll.get(o.id) ?? { input: 0, output: 0, calls: 0 };
+    const s = storageMap.get(o.id);
+    return {
+      id: o.id,
+      name: o.name,
+      input30: u30o.input, output30: u30o.output, calls30: u30o.calls,
+      inputAll: uAllo.input, outputAll: uAllo.output, callsAll: uAllo.calls,
+      storageBytes: Number(s?.bytes ?? 0),
+      files: Number(s?.files ?? 0),
+      threads30: ing30.get(o.id) ?? 0,
+      threadsAll: ingAll.get(o.id) ?? 0,
+    };
+  });
+
+  const storageTotalBytes = byOrg.reduce((a, o) => a + o.storageBytes, 0);
+  const storageTotalFiles = byOrg.reduce((a, o) => a + o.files, 0);
+  const threads30Total = byOrg.reduce((a, o) => a + o.threads30, 0);
+  const threadsAllTotal = byOrg.reduce((a, o) => a + o.threadsAll, 0);
+
+  return c.json({
+    last30: summarize(rows30),
+    allTime: summarize(rowsAll),
+    storageTotalBytes,
+    storageTotalFiles,
+    threads30Total,
+    threadsAllTotal,
+    byOrg: byOrg.sort((a, b) => b.inputAll + b.outputAll - (a.inputAll + a.outputAll)),
+  });
+});
+
 // ─── PATCH /api/platform/orgs/:id — suspend / reactivate ────
 const patchSchema = z.object({ suspended: z.boolean() });
 

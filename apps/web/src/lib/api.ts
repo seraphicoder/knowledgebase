@@ -419,6 +419,66 @@ export function setOrgSuspended(id: string, suspended: boolean): Promise<{ ok: b
   return request(`/api/platform/orgs/${id}`, { method: 'PATCH', body: JSON.stringify({ suspended }) });
 }
 
+// ─── Analytics ──────────────────────────────────────────────
+export interface AnalyticsOverview {
+  threads: { total: number; staged: number; queued: number; excluded: number; ingestedLast30: number };
+  processing: { extracted: number; skipped: number; errored: number };
+  knowledge: { publishedArticles: number; draftsPendingReview: number; verifiedPairs: number };
+  replyAgent: {
+    total: number;
+    pending: number;
+    accepted: number;
+    edited: number;
+    discarded: number;
+    deflectionRate: number | null;
+    avgConfidence: number | null;
+  };
+}
+
+export function getAnalyticsOverview(): Promise<AnalyticsOverview> {
+  return request('/api/analytics/overview');
+}
+
+export interface ModelUsage {
+  provider: string;
+  model: string;
+  input: number;
+  output: number;
+  calls: number;
+}
+
+export interface UsageWindow {
+  totalInput: number;
+  totalOutput: number;
+  totalCalls: number;
+  byModel: ModelUsage[];
+}
+
+export interface PlatformOrgUsage {
+  id: string;
+  name: string;
+  input30: number; output30: number; calls30: number;
+  inputAll: number; outputAll: number; callsAll: number;
+  storageBytes: number;
+  files: number;
+  threads30: number;
+  threadsAll: number;
+}
+
+export interface PlatformAnalytics {
+  last30: UsageWindow;
+  allTime: UsageWindow;
+  storageTotalBytes: number;
+  storageTotalFiles: number;
+  threads30Total: number;
+  threadsAllTotal: number;
+  byOrg: PlatformOrgUsage[];
+}
+
+export function getPlatformAnalytics(): Promise<PlatformAnalytics> {
+  return request('/api/platform/analytics');
+}
+
 export interface KbSearchResult {
   id: string;
   title: string;

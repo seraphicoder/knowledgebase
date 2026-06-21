@@ -4,6 +4,7 @@ import { getServiceClient } from '../lib/supabase.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
 import { writeAudit } from '../lib/audit.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
+import { withOrg } from '../lib/ai-usage.js';
 import { log } from '../lib/logger.js';
 
 const MANAGER_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
@@ -270,7 +271,7 @@ kb.post('/kb/search', async (c) => {
 
   // 1. Try semantic search (needs an OpenAI key to embed the query).
   try {
-    const embedding = await embedText(q);
+    const embedding = await withOrg(orgId, () => embedText(q));
     const { data, error } = await db.rpc('match_kb_articles', {
       p_org_id: orgId,
       p_query_embedding: toVector(embedding),
