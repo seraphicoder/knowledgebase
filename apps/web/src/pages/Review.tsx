@@ -8,6 +8,8 @@ import {
   rejectExtraction,
   listThreadAttachments,
   getExtractionSimilar,
+  mergePreview,
+  mergeApply,
   type Extraction,
   type ExtractionSourceThread,
   type ExtractionEdit,
@@ -181,6 +183,35 @@ function ReviewDrawer({
   const [editing, setEditing] = useState<{ id: string; source: string } | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [similar, setSimilar] = useState<SimilarArticle[]>([]);
+  const [merging, setMerging] = useState<{ articleId: string; title: string; body: string } | null>(null);
+  const [mergeBusy, setMergeBusy] = useState(false);
+
+  async function startMerge(articleId: string) {
+    setMergeBusy(true);
+    setError(null);
+    try {
+      const { merged } = await mergePreview(id, articleId);
+      setMerging({ articleId, title: merged.title, body: merged.body });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not build a merge preview');
+    } finally {
+      setMergeBusy(false);
+    }
+  }
+
+  async function applyMerge() {
+    if (!merging) return;
+    setMergeBusy(true);
+    setError(null);
+    try {
+      await mergeApply(id, { articleId: merging.articleId, title: merging.title, body: merging.body });
+      setMerging(null);
+      onResolved();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Merge failed');
+      setMergeBusy(false);
+    }
+  }
 
   useEffect(() => {
     let active = true;
@@ -312,6 +343,13 @@ function ReviewDrawer({
                       <Link to={`/kb?article=${s.id}`} className="text-blue-700 underline hover:text-blue-900">
                         {s.title}
                       </Link>
+                      <button
+                        onClick={() => void startMerge(s.id)}
+                        disabled={mergeBusy}
+                        className="ml-2 text-blue-700 underline hover:text-blue-900 disabled:opacity-40"
+                      >
+                        merge into this
+                      </button>
                     </li>
                   ))}
                 </ul>
@@ -447,6 +485,42 @@ function ReviewDrawer({
             }}
           />
         </Suspense>
+      )}
+
+      {merging && (
+        <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/50 p-6" onClick={() => !mergeBusy && setMerging(null)}>
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="mb-1 text-lg font-semibold">Merge into existing article</h3>
+            <p className="mb-3 text-xs text-gray-500">
+              AI-merged result — edit if needed, then apply. This updates the existing article (new version) and removes this draft from the queue.
+            </p>
+            <label className="mb-2 block text-sm">
+              <span className="mb-1 block font-medium text-gray-600">Title</span>
+              <input
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                value={merging.title}
+                onChange={(e) => setMerging((m) => (m ? { ...m, title: e.target.value } : m))}
+              />
+            </label>
+            <label className="mb-3 block text-sm">
+              <span className="mb-1 block font-medium text-gray-600">Body (merged)</span>
+              <textarea
+                className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                rows={14}
+                value={merging.body}
+                onChange={(e) => setMerging((m) => (m ? { ...m, body: e.target.value } : m))}
+              />
+            </label>
+            <div className="flex gap-2">
+              <button onClick={() => void applyMerge()} disabled={mergeBusy} className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
+                {mergeBusy ? 'Applying…' : 'Apply merge'}
+              </button>
+              <button onClick={() => setMerging(null)} disabled={mergeBusy} className="rounded border border-gray-300 px-3 py-1.5 text-sm">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

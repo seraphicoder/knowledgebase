@@ -127,8 +127,12 @@ Health check is `GET /health`. Node is pinned ≥20.12 ([`.nvmrc`](.nvmrc) /
 Built: Milestone 1 (ingestion + staging), Milestone 2 (AI extraction pipeline —
 multi-Q&A: one thread can yield several drafts, one per distinct resolved issue),
 Milestone 3 review queue (humans qualify AI-drafted extractions, then **Approve &
-Publish**), and Milestone 4 KB output — published articles are **searchable in
-plain language** (pgvector semantic search + keyword fallback) and **editable**
+Publish**), and Milestone 4 KB output. At review time, a draft is checked for **near-duplicate
+published articles** (flagged in the queue and inside the draft, with links); a
+reviewer can **AI-merge** the draft into an existing article (Claude unifies them,
+human edits/approves, the article re-versions and the draft is marked `merged`)
+instead of creating a duplicate. Published articles are **searchable in plain
+language** (pgvector semantic search + keyword fallback) and **editable**
 (an article's **Edit** moves it back to draft in Review, where text + images are
 updated and it's re-published). A "Process Approved Threads" button on `/staging`
 triggers the pipeline.

@@ -4,6 +4,8 @@ import { getServiceClient } from '../lib/supabase.js';
 import { writeAudit } from '../lib/audit.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
 import { publishExtraction, type ExtractionForPublish, type PublishImage } from '../pipeline/kb-publish.js';
+import { mergeArticle } from '../pipeline/kb-merge.js';
+import { embedText, toVector } from '../pipeline/embedder.js';
 
 // Milestone 3 — Review Queue. Humans qualify AI-drafted extractions before they
 // become KB articles: edit the draft, then approve or reject. Every query is
@@ -128,6 +130,77 @@ review.patch('/extractions/:id', async (c) => {
   await writeAudit({
     orgId, userId, action: 'extraction.edited', resource: 'extractions', resourceId: id,
     metadata: { fields: Object.keys(parsed.data) },
+  });
+  return c.json({ ok: true });
+});
+
+// ─── POST /api/extractions/:id/merge-preview — propose a merge ──
+// Returns Claude's merged title+body (NOT saved) so a human can review/edit it.
+const mergePreviewSchema = z.object({ articleId: z.string().uuid() });
+
+review.post('/extractions/:id/merge-preview', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, role } = c.get('auth');
+  if (!canReview(role)) return c.json({ error: 'Only reviewers can merge' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing extraction id' }, 400);
+  const parsed = mergePreviewSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: 'Missing articleId' }, 400);
+  const db = getServiceClient();
+
+  const [{ data: draft }, { data: article }] = await Promise.all([
+    db.from('extractions').select('title, question, answer, caveats').eq('org_id', orgId).eq('id', id).eq('status', 'pending_review').single(),
+    db.from('kb_articles').select('id, title, body').eq('org_id', orgId).eq('id', parsed.data.articleId).single(),
+  ]);
+  if (!draft) return c.json({ error: 'No pending extraction with that id' }, 404);
+  if (!article) return c.json({ error: 'Article not found' }, 404);
+
+  try {
+    const merged = await mergeArticle(
+      { title: article.title as string, body: article.body as string },
+      { title: draft.title as string | null, question: draft.question as string | null, answer: draft.answer as string | null, caveats: draft.caveats as string | null },
+    );
+    return c.json({ merged });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : 'Merge failed' }, 500);
+  }
+});
+
+// ─── POST /api/extractions/:id/merge — apply the merge ──────
+// Updates the existing article (re-embedded, version bumped) and marks the draft
+// 'merged' so it leaves the queue without publishing a duplicate.
+const mergeApplySchema = z.object({
+  articleId: z.string().uuid(),
+  title: z.string().min(1),
+  body: z.string().min(1),
+});
+
+review.post('/extractions/:id/merge', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!canReview(role)) return c.json({ error: 'Only reviewers can merge' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing extraction id' }, 400);
+  const parsed = mergeApplySchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, 400);
+  const db = getServiceClient();
+
+  const { data: draft } = await db.from('extractions').select('id').eq('org_id', orgId).eq('id', id).eq('status', 'pending_review').single();
+  if (!draft) return c.json({ error: 'No pending extraction with that id' }, 404);
+  const { data: article } = await db.from('kb_articles').select('id, version').eq('org_id', orgId).eq('id', parsed.data.articleId).single();
+  if (!article) return c.json({ error: 'Article not found' }, 404);
+
+  const embedding = toVector(await embedText(`${parsed.data.title}\n${parsed.data.body}`));
+  const { error: upErr } = await db
+    .from('kb_articles')
+    .update({ title: parsed.data.title, body: parsed.data.body, embedding, version: ((article.version as number) ?? 1) + 1 })
+    .eq('org_id', orgId)
+    .eq('id', parsed.data.articleId);
+  if (upErr) return c.json({ error: upErr.message }, 500);
+
+  await db.from('extractions').update({ status: 'merged', reviewed_by: userId, reviewed_at: new Date().toISOString() }).eq('id', id);
+
+  await writeAudit({
+    orgId, userId, action: 'article.merged', resource: 'kb_articles',
+    resourceId: parsed.data.articleId, metadata: { fromExtraction: id },
   });
   return c.json({ ok: true });
 });

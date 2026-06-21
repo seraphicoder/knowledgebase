@@ -191,6 +191,20 @@ export function getExtractionSimilar(id: string): Promise<{ similar: SimilarArti
   return request(`/api/extractions/${id}/similar`);
 }
 
+export function mergePreview(extractionId: string, articleId: string): Promise<{ merged: { title: string; body: string } }> {
+  return request(`/api/extractions/${extractionId}/merge-preview`, {
+    method: 'POST',
+    body: JSON.stringify({ articleId }),
+  });
+}
+
+export function mergeApply(
+  extractionId: string,
+  body: { articleId: string; title: string; body: string },
+): Promise<{ ok: boolean }> {
+  return request(`/api/extractions/${extractionId}/merge`, { method: 'POST', body: JSON.stringify(body) });
+}
+
 export function approveExtraction(
   id: string,
   images?: PublishImageInput[],
