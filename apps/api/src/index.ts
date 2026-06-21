@@ -49,8 +49,20 @@ if (existsSync(webRoot)) {
 }
 
 const port = env.port();
-serve({ fetch: app.fetch, port }, (info) => {
+const server = serve({ fetch: app.fetch, port }, (info) => {
   log.info('mailmind-api listening', { port: info.port, env: env.nodeEnv() });
 });
+
+// Graceful shutdown: on a redeploy/restart the platform sends SIGTERM. Close the
+// server so in-flight requests finish, then exit 0 (which also stops npm from
+// reporting the signal as a failed lifecycle script).
+function shutdown(signal: string): void {
+  log.info('shutting down', { signal });
+  server.close(() => process.exit(0));
+  // Don't hang forever if connections won't drain.
+  setTimeout(() => process.exit(0), 10_000).unref();
+}
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
 
 export { app };

@@ -137,8 +137,15 @@ export interface PipelineStats {
   errored: number;
 }
 
-export function runPipeline(): Promise<{ ok: boolean; stats: PipelineStats }> {
+export function runPipeline(): Promise<{ ok: boolean; started?: boolean; alreadyRunning?: boolean }> {
   return request('/api/pipeline/run', { method: 'POST' });
+}
+
+export function getPipelineStatus(): Promise<{
+  running: boolean;
+  lastFinished: { stats: PipelineStats; at: string } | null;
+}> {
+  return request('/api/pipeline/status');
 }
 
 // ─── Review queue (extractions) ─────────────────────────────
@@ -184,9 +191,21 @@ export function listExtractions(
   return request(`/api/extractions?${params.toString()}`);
 }
 
+export interface CuratedImage {
+  storage_path: string;
+  content_type: string | null;
+  edited: boolean;
+  source_attachment_id: string | null;
+  url: string | null;
+}
+
 export function getExtraction(
   id: string,
-): Promise<{ extraction: Extraction; thread: ExtractionSourceThread | null }> {
+): Promise<{
+  extraction: Extraction;
+  thread: ExtractionSourceThread | null;
+  curatedImages: CuratedImage[] | null;
+}> {
   return request(`/api/extractions/${id}`);
 }
 
@@ -195,8 +214,11 @@ export function editExtraction(id: string, patch: ExtractionEdit): Promise<{ ok:
 }
 
 export interface PublishImageInput {
-  sourceAttachmentId: string;
+  sourceAttachmentId?: string;
   editedDataUrl?: string | null;
+  storagePath?: string;
+  contentType?: string | null;
+  edited?: boolean;
 }
 
 export interface SimilarArticle {

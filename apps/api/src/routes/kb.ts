@@ -210,23 +210,43 @@ kb.post('/kb/:id/unpublish', async (c: Context<{ Variables: AuthVars }>) => {
     .single();
   if (error || !art) return c.json({ error: 'Article not found' }, 404);
   if (!art.extraction_id) return c.json({ error: 'This article has no source draft to edit' }, 400);
+  const extractionId = art.extraction_id as string;
 
-  // Back to draft so it reappears in the Review queue.
+  // Snapshot the article's curated images onto the draft so the re-edit KEEPS
+  // them (including edited versions). Storage objects are intentionally NOT
+  // deleted — the reviewer can choose to reset to the originals in Review.
+  const { data: imgs } = await db
+    .from('kb_article_images')
+    .select('storage_path, content_type, edited, source_attachment_id, position')
+    .eq('org_id', orgId)
+    .eq('kb_article_id', id)
+    .order('position', { ascending: true });
+  const curatedImages = (imgs ?? []).map((i) => ({
+    storage_path: i.storage_path,
+    content_type: i.content_type,
+    edited: i.edited,
+    source_attachment_id: i.source_attachment_id,
+  }));
+
+  const { data: ex } = await db.from('extractions').select('metadata').eq('org_id', orgId).eq('id', extractionId).single();
+  const meta = (ex?.metadata as Record<string, unknown> | null) ?? {};
+
+  // Back to draft (carrying the curated-image snapshot) so it reappears in Review.
   await db
     .from('extractions')
-    .update({ status: 'pending_review', reviewed_by: null, reviewed_at: null })
+    .update({ status: 'pending_review', reviewed_by: null, reviewed_at: null, metadata: { ...meta, curated_images: curatedImages } })
     .eq('org_id', orgId)
-    .eq('id', art.extraction_id as string);
+    .eq('id', extractionId);
 
-  // Remove the live article (cascade clears kb_article_images).
+  // Remove the live article (cascade clears kb_article_images rows; storage kept).
   const { error: delErr } = await db.from('kb_articles').delete().eq('org_id', orgId).eq('id', id);
   if (delErr) return c.json({ error: delErr.message }, 500);
 
   await writeAudit({
     orgId, userId, action: 'article.unpublished', resource: 'extractions',
-    resourceId: art.extraction_id as string, metadata: { articleId: id },
+    resourceId: extractionId, metadata: { articleId: id },
   });
-  return c.json({ ok: true, extractionId: art.extraction_id });
+  return c.json({ ok: true, extractionId });
 });
 
 // ─── POST /api/kb/search — semantic search w/ keyword fallback ──

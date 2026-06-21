@@ -63,7 +63,19 @@ review.get('/extractions/:id', async (c) => {
       .single();
     thread = t ?? null;
   }
-  return c.json({ extraction: data, thread });
+
+  // If this draft was unpublished from an article, its curated images were
+  // snapshotted onto metadata — return them (with signed URLs) so Review keeps them.
+  type CuratedImage = { storage_path: string; content_type: string | null; edited: boolean; source_attachment_id: string | null };
+  const snap = (data.metadata as { curated_images?: CuratedImage[] } | null)?.curated_images;
+  let curatedImages: (CuratedImage & { url: string | null })[] | null = null;
+  if (snap && snap.length > 0) {
+    const { data: signed } = await db.storage.from('attachments').createSignedUrls(snap.map((s) => s.storage_path), 3600);
+    const urlByPath = new Map((signed ?? []).map((s) => [s.path, s.signedUrl]));
+    curatedImages = snap.map((s) => ({ ...s, url: urlByPath.get(s.storage_path) ?? null }));
+  }
+
+  return c.json({ extraction: data, thread, curatedImages });
 });
 
 // ─── GET /api/extractions/:id/similar — near-duplicate KB articles ──

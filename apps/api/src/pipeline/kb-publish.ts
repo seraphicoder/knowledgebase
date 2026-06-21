@@ -22,9 +22,13 @@ export interface ExtractionForPublish {
 
 // Reviewer's per-image choice at publish time. Only included images are sent.
 export interface PublishImage {
-  sourceAttachmentId: string;
+  sourceAttachmentId?: string;
   /** Edited/cropped/annotated version as a data URL; absent = use the original. */
   editedDataUrl?: string | null;
+  /** Reuse an already-stored object (preserved/edited from a prior publish). */
+  storagePath?: string;
+  contentType?: string;
+  edited?: boolean;
 }
 
 const BUCKET = 'attachments';
@@ -104,13 +108,10 @@ export async function attachArticleImages(
   threadId: string | null,
   images?: PublishImage[],
 ): Promise<number> {
-  if (!threadId) return 0;
-
-  const { data: atts } = await db
-    .from('attachments')
-    .select('id, storage_path, content_type')
-    .eq('org_id', orgId)
-    .eq('thread_id', threadId);
+  // Source attachments (for the "copy original" and default-all cases).
+  const { data: atts } = threadId
+    ? await db.from('attachments').select('id, storage_path, content_type').eq('org_id', orgId).eq('thread_id', threadId)
+    : { data: [] };
   const byId = new Map((atts ?? []).map((a) => [a.id as string, a]));
 
   // No explicit curation -> include all source images unedited.
@@ -120,14 +121,14 @@ export async function attachArticleImages(
   let position = 0;
   let count = 0;
   for (const img of chosen) {
-    const src = byId.get(img.sourceAttachmentId);
-    if (!src && !img.editedDataUrl) continue; // unknown source, nothing to store
+    const src = img.sourceAttachmentId ? byId.get(img.sourceAttachmentId) : undefined;
 
     let storagePath: string;
-    let contentType = (src?.content_type as string | null) ?? 'image/png';
-    let edited = false;
+    let contentType: string;
+    let edited: boolean;
 
     if (img.editedDataUrl) {
+      // Newly edited this session -> upload a fresh object.
       const parsed = parseDataUrl(img.editedDataUrl);
       if (!parsed) continue;
       contentType = parsed.contentType;
@@ -138,8 +139,18 @@ export async function attachArticleImages(
         continue;
       }
       edited = true;
+    } else if (img.storagePath) {
+      // Reuse an already-stored object (preserved/edited from a prior publish).
+      storagePath = img.storagePath;
+      contentType = img.contentType ?? (src?.content_type as string | null) ?? 'image/png';
+      edited = img.edited ?? false;
+    } else if (src) {
+      // Copy the original source attachment by reference.
+      storagePath = src.storage_path as string;
+      contentType = (src.content_type as string | null) ?? 'image/png';
+      edited = false;
     } else {
-      storagePath = src!.storage_path as string;
+      continue; // nothing to store
     }
 
     const { error } = await db.from('kb_article_images').insert({

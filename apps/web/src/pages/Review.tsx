@@ -13,7 +13,6 @@ import {
   type Extraction,
   type ExtractionSourceThread,
   type ExtractionEdit,
-  type ThreadAttachment,
   type PublishImageInput,
   type SimilarArticle,
 } from '../lib/api';
@@ -24,9 +23,19 @@ import { useInfinitePages } from '../lib/useInfinitePages';
 // Heavy canvas editor — lazy-loaded so it stays out of the main bundle.
 const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 
-interface ImageChoice {
+// A unified curation item: a source-thread attachment OR an image preserved from
+// a prior publish (possibly edited). On publish it resolves to a source ref, a
+// reused storage object, or a freshly uploaded edit.
+interface CurImage {
+  key: string;
+  url: string | null;
+  filename?: string | null;
   included: boolean;
-  editedDataUrl?: string;
+  edited: boolean;
+  sourceAttachmentId?: string;
+  storagePath?: string;
+  contentType?: string | null;
+  editedDataUrl?: string; // set if re-edited this session
 }
 
 // Milestone 3 Review Queue. Humans qualify AI-drafted extractions: edit the
@@ -164,9 +173,9 @@ function ReviewDrawer({
   const [thread, setThread] = useState<ExtractionSourceThread | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [images, setImages] = useState<ThreadAttachment[]>([]);
-  const [choices, setChoices] = useState<Record<string, ImageChoice>>({});
-  const [editing, setEditing] = useState<{ id: string; source: string } | null>(null);
+  const [curImages, setCurImages] = useState<CurImage[]>([]);
+  const [fromArticle, setFromArticle] = useState(false);
+  const [editing, setEditing] = useState<{ key: string; source: string } | null>(null);
   const [previewIndex, setPreviewIndex] = useState<number | null>(null);
   const [similar, setSimilar] = useState<SimilarArticle[]>([]);
   const [merging, setMerging] = useState<{ articleId: string; title: string; body: string } | null>(null);
@@ -199,6 +208,18 @@ function ReviewDrawer({
     }
   }
 
+  async function loadSourceImages(threadId: string): Promise<CurImage[]> {
+    const att = await listThreadAttachments(threadId).catch(() => ({ attachments: [] }));
+    return att.attachments.map((a) => ({
+      key: a.id,
+      url: a.url,
+      filename: a.filename,
+      included: true,
+      edited: false,
+      sourceAttachmentId: a.id,
+    }));
+  }
+
   useEffect(() => {
     let active = true;
     getExtraction(id)
@@ -206,12 +227,24 @@ function ReviewDrawer({
         if (!active) return;
         setDraft(res.extraction);
         setThread(res.thread);
-        // Load the source thread's images and default them all to "included".
-        if (res.thread) {
-          const att = await listThreadAttachments(res.thread.id).catch(() => ({ attachments: [] }));
-          if (!active) return;
-          setImages(att.attachments);
-          setChoices(Object.fromEntries(att.attachments.map((a) => [a.id, { included: true }])));
+        if (res.curatedImages && res.curatedImages.length > 0) {
+          // Re-editing a published article — keep its curated/edited images.
+          setFromArticle(true);
+          setCurImages(
+            res.curatedImages.map((ci, i) => ({
+              key: ci.storage_path || `c${i}`,
+              url: ci.url,
+              included: true,
+              edited: ci.edited,
+              sourceAttachmentId: ci.source_attachment_id ?? undefined,
+              storagePath: ci.storage_path,
+              contentType: ci.content_type,
+            })),
+          );
+        } else if (res.thread) {
+          setFromArticle(false);
+          const imgs = await loadSourceImages(res.thread.id);
+          if (active) setCurImages(imgs);
         }
       })
       .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load draft'));
@@ -224,29 +257,38 @@ function ReviewDrawer({
     };
   }, [id]);
 
+  async function resetToOriginals() {
+    if (!thread) return;
+    setCurImages(await loadSourceImages(thread.id));
+    setFromArticle(false);
+  }
+
   function imagePayload(): PublishImageInput[] {
-    return images
-      .filter((a) => choices[a.id]?.included)
-      .map((a) => ({ sourceAttachmentId: a.id, editedDataUrl: choices[a.id]?.editedDataUrl ?? null }));
+    return curImages
+      .filter((c) => c.included)
+      .map((c) => {
+        if (c.editedDataUrl) return { editedDataUrl: c.editedDataUrl, sourceAttachmentId: c.sourceAttachmentId };
+        if (c.storagePath) return { storagePath: c.storagePath, contentType: c.contentType, edited: c.edited, sourceAttachmentId: c.sourceAttachmentId };
+        return { sourceAttachmentId: c.sourceAttachmentId };
+      });
   }
 
   // Open the editor with a data URL (avoids tainted-canvas on cross-origin images).
-  async function openEditor(att: ThreadAttachment) {
-    const existing = choices[att.id]?.editedDataUrl;
-    if (existing) {
-      setEditing({ id: att.id, source: existing });
+  async function openEditor(img: CurImage) {
+    if (img.editedDataUrl) {
+      setEditing({ key: img.key, source: img.editedDataUrl });
       return;
     }
-    if (!att.url) return;
+    if (!img.url) return;
     try {
-      const blob = await (await fetch(att.url)).blob();
+      const blob = await (await fetch(img.url)).blob();
       const dataUrl = await new Promise<string>((resolve, reject) => {
         const fr = new FileReader();
         fr.onload = () => resolve(fr.result as string);
         fr.onerror = reject;
         fr.readAsDataURL(blob);
       });
-      setEditing({ id: att.id, source: dataUrl });
+      setEditing({ key: img.key, source: dataUrl });
     } catch {
       setError('Could not open the image for editing.');
     }
@@ -370,25 +412,31 @@ function ReviewDrawer({
               <textarea className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm" rows={2} value={draft.caveats ?? ''} onChange={(e) => set('caveats', e.target.value)} />
             </Field>
 
-            {images.length > 0 && (
+            {curImages.length > 0 && (
               <div className="border-t border-gray-100 pt-4">
-                <h3 className="mb-2 text-sm font-medium text-gray-700">
-                  Images ({images.filter((a) => choices[a.id]?.included).length}/{images.length} included)
-                </h3>
+                <div className="mb-2 flex items-center justify-between">
+                  <h3 className="text-sm font-medium text-gray-700">
+                    Images ({curImages.filter((c) => c.included).length}/{curImages.length} included)
+                  </h3>
+                  {fromArticle && (
+                    <button type="button" onClick={() => void resetToOriginals()} className="text-xs text-blue-700 hover:underline">
+                      Reset to original images
+                    </button>
+                  )}
+                </div>
                 <p className="mb-2 text-xs text-gray-400">Uncheck to leave an image off the published article, or edit to crop/annotate it.</p>
                 <div className="flex flex-wrap gap-3">
-                  {images.map((a, idx) => {
-                    const ch = choices[a.id];
-                    const preview = ch?.editedDataUrl ?? a.url ?? '';
+                  {curImages.map((c, idx) => {
+                    const preview = c.editedDataUrl ?? c.url ?? '';
                     return (
-                      <div key={a.id} className="w-28">
-                        <div className={`relative rounded border ${ch?.included ? 'border-emerald-400' : 'border-gray-200 opacity-50'}`}>
+                      <div key={c.key} className="w-28">
+                        <div className={`relative rounded border ${c.included ? 'border-emerald-400' : 'border-gray-200 opacity-50'}`}>
                           {preview && (
                             <button type="button" onClick={() => setPreviewIndex(idx)} className="block w-full" title="Preview">
-                              <img src={preview} alt={a.filename ?? ''} className="h-24 w-full cursor-zoom-in rounded object-cover" />
+                              <img src={preview} alt={c.filename ?? ''} className="h-24 w-full cursor-zoom-in rounded object-cover" />
                             </button>
                           )}
-                          {ch?.editedDataUrl && (
+                          {(c.editedDataUrl || c.edited) && (
                             <span className="absolute left-1 top-1 rounded bg-blue-600 px-1 text-[10px] text-white">edited</span>
                           )}
                         </div>
@@ -396,14 +444,14 @@ function ReviewDrawer({
                           <label className="flex items-center gap-1">
                             <input
                               type="checkbox"
-                              checked={Boolean(ch?.included)}
+                              checked={c.included}
                               onChange={(e) =>
-                                setChoices((s) => ({ ...s, [a.id]: { ...s[a.id], included: e.target.checked } }))
+                                setCurImages((list) => list.map((x) => (x.key === c.key ? { ...x, included: e.target.checked } : x)))
                               }
                             />
                             include
                           </label>
-                          <button type="button" onClick={() => void openEditor(a)} className="text-blue-700 hover:underline">
+                          <button type="button" onClick={() => void openEditor(c)} className="text-blue-700 hover:underline">
                             edit
                           </button>
                         </div>
@@ -447,7 +495,7 @@ function ReviewDrawer({
 
       {previewIndex != null && (
         <Lightbox
-          images={images.map((a) => ({ url: choices[a.id]?.editedDataUrl ?? a.url ?? '', filename: a.filename }))}
+          images={curImages.map((c) => ({ url: c.editedDataUrl ?? c.url ?? '', filename: c.filename }))}
           index={previewIndex}
           onIndex={setPreviewIndex}
           onClose={() => setPreviewIndex(null)}
@@ -466,7 +514,9 @@ function ReviewDrawer({
             source={editing.source}
             onClose={() => setEditing(null)}
             onSave={(dataUrl) => {
-              setChoices((s) => ({ ...s, [editing.id]: { included: true, editedDataUrl: dataUrl } }));
+              setCurImages((list) =>
+                list.map((x) => (x.key === editing.key ? { ...x, included: true, edited: true, editedDataUrl: dataUrl } : x)),
+              );
               setEditing(null);
             }}
           />

@@ -118,9 +118,11 @@ Health check is `GET /health`. Node is pinned ≥20.12 ([`.nvmrc`](.nvmrc) /
 > `VITE_API_BASE_URL` pointing at the Railway URL, and set `WEB_ORIGIN` on Railway
 > to re-enable the CORS allowlist.
 
-> **Follow-up:** `POST /api/pipeline/run` runs the whole batch synchronously within
-> the request. On a long backlog this can outlast HTTP proxy timeouts — before
-> heavy use, move it to a background job (return `202` and run off-request).
+> **Pipeline runs off-request:** `POST /api/pipeline/run` returns `202` and processes
+> in the background (in-memory per-org guard prevents overlap); the UI polls
+> `GET /api/pipeline/status` for completion. A run in flight during a redeploy is
+> lost (no job queue yet) — fine for manual triggering. The server also handles
+> SIGTERM gracefully (drains in-flight requests, exits 0).
 
 ## Status
 
@@ -156,11 +158,13 @@ the term appears in a thread; termless facts are global rules.
 
 Image attachments: images on Zendesk tickets and emails are captured during
 ingestion and stored in a private Supabase Storage bucket (migration 008), shown
-as thumbnails via short-lived signed URLs. In **Review**, each draft's source
-images can be **included/excluded** and **edited** (crop + text/shapes/freehand,
-via a lazy-loaded canvas editor); on Approve & Publish only the chosen/edited
-images attach to the article (`kb_article_images`, migration 009). Images only for
-now (no AI vision yet).
+as thumbnails via short-lived signed URLs. In **Review**, each draft's images
+can be **included/excluded** and **edited** (crop + text/shapes/freehand, via a
+lazy-loaded canvas editor); on Approve & Publish only the chosen/edited images
+attach to the article (`kb_article_images`, migration 009). **Re-editing a
+published article keeps its curated/edited images** (snapshotted onto the draft on
+unpublish; storage objects are not deleted), with a **"Reset to original images"**
+option to go back to the source attachments. Images only for now (no AI vision yet).
 
 Reply Agent (`/replies`, Milestone 5): **paste a ticket that just came in** (or
 pick an existing one) → a KB-grounded **suggested reply** is drafted (Sonnet over retrieved KB articles + similar past threads +

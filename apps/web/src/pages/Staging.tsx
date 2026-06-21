@@ -7,6 +7,7 @@ import {
   approveBatch,
   excludeThread,
   runPipeline,
+  getPipelineStatus,
   type StagedThread,
   type ThreadDetail,
   type StagedFilters,
@@ -139,16 +140,28 @@ export function Staging() {
     }
   }
 
+  function pollPipeline() {
+    getPipelineStatus()
+      .then((s) => {
+        if (s.running) {
+          setTimeout(pollPipeline, 2500);
+        } else {
+          setRunning(false);
+          if (s.lastFinished) setRunResult(s.lastFinished.stats);
+        }
+      })
+      .catch(() => setRunning(false));
+  }
+
   async function onRunPipeline() {
     setRunning(true);
     setActionError(null);
     setRunResult(null);
     try {
-      const res = await runPipeline();
-      setRunResult(res.stats);
+      await runPipeline(); // starts off-request (202); we poll for completion
+      pollPipeline();
     } catch (e) {
       setActionError(e instanceof Error ? e.message : 'Pipeline run failed');
-    } finally {
       setRunning(false);
     }
   }
