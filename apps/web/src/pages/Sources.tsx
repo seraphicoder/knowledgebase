@@ -27,7 +27,7 @@ export function Sources() {
 
   const [running, setRunning] = useState(false);
   const [ingestResult, setIngestResult] = useState<IngestStats | null>(null);
-  const [limit, setLimit] = useState('250'); // newest N per source; blank = backend default
+  const [limit, setLimit] = useState('25'); // max NEW tickets per pull; blank = backend default
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -159,7 +159,7 @@ export function Sources() {
         </div>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1 text-xs text-gray-500">
-            Newest
+            Max
             <input
               type="number"
               min={1}
@@ -167,10 +167,10 @@ export function Sources() {
               onChange={(e) => setLimit(e.target.value)}
               disabled={running}
               className="w-20 rounded border border-gray-300 px-2 py-1.5 text-sm disabled:opacity-50"
-              placeholder="all"
-              title="How many of the newest tickets to pull per source (blank = backend default). Re-run to walk further back."
+              placeholder="25"
+              title="Cap on NEW tickets pulled per source. Pulls are incremental: newest-first, stopping at the first already-imported ticket — so a caught-up source finishes almost instantly."
             />
-            per source
+            new / source
           </label>
           <button
             onClick={() => void onIngestAll()}

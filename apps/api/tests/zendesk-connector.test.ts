@@ -109,6 +109,43 @@ describe('zendesk-connector', () => {
     expect(nextCursor).toBe('NEXT'); // resume token for the next (older) batch
   });
 
+  it('incremental: stops at the first already-known ticket without fetching its comments', async () => {
+    let commentCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/v2/tickets.json')) return jsonResponse(cursorPage([ticket(10), ticket(9)], 'CUR', true));
+      if (url.includes('/comments.json')) {
+        commentCalls++;
+        return jsonResponse({ comments: [], next_page: null });
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { conversations, nextCursor } = await connector().fetchConversations(null, {
+      isKnown: (id) => id === '10', // newest is already ingested
+    });
+    expect(conversations).toHaveLength(0);
+    expect(commentCalls).toBe(0); // never did the expensive per-ticket fetch
+    expect(nextCursor).toBeNull(); // caught up
+  });
+
+  it('incremental: pulls new tickets newest-first and stops at the first known one', async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/v2/tickets.json')) return jsonResponse(cursorPage([ticket(12), ticket(11), ticket(10)], 'CUR', true));
+      if (url.includes('/comments.json')) return jsonResponse({ comments: [], next_page: null });
+      throw new Error(`unexpected url ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { conversations, nextCursor } = await connector().fetchConversations(null, {
+      isKnown: (id) => id === '10', // 12 and 11 are new; 10 is known
+    });
+    expect(conversations.map((c) => c.externalId)).toEqual(['12', '11']);
+    expect(nextCursor).toBeNull();
+  });
+
   it('passes the cursor through as page[after] to resume further back', async () => {
     let sawAfter: string | null = null;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

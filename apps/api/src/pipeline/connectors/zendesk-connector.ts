@@ -84,48 +84,49 @@ export class ZendeskConnector implements Connector {
     }
   }
 
+  // Newest-first. The tickets LIST endpoint is cheap (one call per page of ids);
+  // the expensive work is per-ticket (comments + attachment downloads + user
+  // lookups). So we page the list and, for each ticket, check `isKnown` BEFORE
+  // any heavy fetch — stopping at the first already-ingested ticket (incremental
+  // "pull new"). Without `isKnown` this is a full fetch up to `limit` (backfill).
+  // Ordering uses sort_by=created_at&sort_order=desc (the Tickets endpoint
+  // rejects the `sort=-created_at` shorthand with a 400).
   async fetchConversations(cursor: string | null, options?: FetchOptions): Promise<FetchPage> {
     const limit = options?.limit;
-    const { tickets, nextCursor } = await this.fetchTicketPages(cursor, limit);
-
-    // Tickets already arrive newest-first. Fetch comments in that same order so
-    // the resulting conversations stay newest-first.
+    const isKnown = options?.isKnown;
     const conversations: RawConversation[] = [];
-    for (const ticket of tickets) {
-      const comments = await this.fetchComments(ticket.id);
-      conversations.push(await this.toConversation(ticket, comments));
-      await sleep(RATE_LIMIT_DELAY_MS);
-    }
-    log.info('Zendesk fetch complete', {
-      tickets: conversations.length, limit: limit ?? null, nextCursor: nextCursor ?? null,
-    });
-    return { conversations, nextCursor };
-  }
-
-  // Cursor pagination on the tickets list endpoint, newest-first. We size each
-  // page to the exact remaining need so the after_cursor always aligns to the
-  // tickets we actually consumed — never skipping a partial page. Ordering uses
-  // sort_by=created_at&sort_order=desc (verified against the live Tickets
-  // endpoint, which rejects the `sort=-created_at` shorthand with a 400).
-  private async fetchTicketPages(
-    cursor: string | null,
-    limit?: number,
-  ): Promise<{ tickets: ZendeskTicket[]; nextCursor: string | null }> {
-    const tickets: ZendeskTicket[] = [];
     let after = cursor;
     let hasMore = true;
+    let stoppedAtKnown = false;
 
-    while (hasMore && (limit === undefined || tickets.length < limit)) {
-      const size = limit === undefined ? PAGE_MAX : Math.min(limit - tickets.length, PAGE_MAX);
+    pages: while (hasMore && (limit === undefined || conversations.length < limit)) {
+      const size = limit === undefined ? PAGE_MAX : Math.min(limit - conversations.length, PAGE_MAX);
       const page = await this.get<TicketsCursorResponse>(this.ticketsPagePath(size, after));
-      tickets.push(...page.tickets);
+
+      for (const ticket of page.tickets) {
+        // Cheap existence check before any expensive per-ticket fetch.
+        if (isKnown && (await isKnown(String(ticket.id)))) {
+          stoppedAtKnown = true;
+          break pages;
+        }
+        const comments = await this.fetchComments(ticket.id);
+        conversations.push(await this.toConversation(ticket, comments));
+        await sleep(RATE_LIMIT_DELAY_MS);
+        if (limit !== undefined && conversations.length >= limit) break;
+      }
+
       after = page.meta.after_cursor;
       hasMore = page.meta.has_more;
-      if (hasMore && (limit === undefined || tickets.length < limit)) await sleep(RATE_LIMIT_DELAY_MS);
+      if (hasMore && (limit === undefined || conversations.length < limit)) await sleep(RATE_LIMIT_DELAY_MS);
     }
 
-    // nextCursor is null only when Zendesk says there is no more history.
-    return { tickets, nextCursor: hasMore ? after : null };
+    // Caught up (hit a known ticket) or no more history => null. Otherwise the
+    // cursor to continue further back (cap reached mid-history).
+    const nextCursor = stoppedAtKnown || !hasMore ? null : after;
+    log.info('Zendesk fetch complete', {
+      tickets: conversations.length, limit: limit ?? null, stoppedAtKnown, nextCursor: nextCursor ?? null,
+    });
+    return { conversations, nextCursor };
   }
 
   private ticketsPagePath(size: number, after: string | null): string {

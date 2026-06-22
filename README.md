@@ -54,6 +54,10 @@ Sources can be managed two ways:
   (IMAP) sources, encrypts credentials server-side, tests the connection, and pulls from
   **all active sources together** ("Pull new tickets", backgrounded). Each ticket records
   which source it came from; Staging/Queued show a **Zendesk/Email badge** and a source filter.
+  In-app pulls are **incremental**: newest-first, checking each ticket's id *before* the
+  expensive comment/attachment fetch and **stopping at the first already-imported ticket** —
+  so a caught-up source finishes almost instantly instead of re-fetching known tickets. The
+  **Max new / source** input caps how many genuinely-new tickets a single run pulls (default 25).
 - **CLI** (below) — for scripted/local runs.
 
 First, store encrypted credentials on a seeded source (reads them from `.env`,

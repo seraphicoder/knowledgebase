@@ -39,6 +39,14 @@ export interface FetchOptions {
    * everything and truncate.
    */
   limit?: number;
+  /**
+   * Incremental "pull new" hook. When provided, the connector — walking
+   * newest-first — checks each conversation's external id BEFORE doing any
+   * expensive per-item work (comment/attachment fetches). The first time it
+   * returns true the connector STOPS: newest-first ordering means everything
+   * older has already been ingested. Omitted = full fetch (backfill).
+   */
+  isKnown?: (externalId: string) => Promise<boolean> | boolean;
 }
 
 export interface FetchPage {
