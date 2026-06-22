@@ -4,6 +4,7 @@ import { getServiceClient } from '../lib/supabase.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
 import { writeAudit } from '../lib/audit.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
+import { buildArticleBody, attachArticleImages } from '../pipeline/kb-publish.js';
 import { withOrg } from '../lib/ai-usage.js';
 import { log } from '../lib/logger.js';
 
@@ -30,6 +31,72 @@ kb.get('/kb', async (c) => {
     .range(offset, offset + limit - 1);
   if (error) return c.json({ error: error.message }, 500);
   return c.json({ articles: data ?? [], total: count ?? 0 });
+});
+
+// ─── POST /api/kb/articles — author an article from scratch ──
+// No ticket/ingestion required. Same fields as the review form, plus directly
+// uploaded photos (data URLs). Published immediately (extraction_id stays null).
+const createArticleSchema = z.object({
+  title: z.string().trim().min(1),
+  question: z.string().trim().min(1),
+  answer: z.string().trim().min(1),
+  caveats: z.string().trim().optional(),
+  category: z.string().trim().optional(),
+  tags: z.array(z.string()).optional(),
+  images: z.array(z.object({ dataUrl: z.string().min(1) })).optional(),
+});
+
+kb.post('/kb/articles', async (c) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!MANAGER_ROLES.has(role)) return c.json({ error: 'Not permitted' }, 403);
+  const parsed = createArticleSchema.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Invalid body' }, 400);
+  const { title, question, answer, caveats, category, tags, images } = parsed.data;
+  const db = getServiceClient();
+
+  const body = buildArticleBody({ question, answer, caveats: caveats ?? null });
+
+  // Best-effort embedding so the article is semantically searchable; keyword
+  // search still works if embeddings are unavailable.
+  let embedding: string | null = null;
+  try {
+    embedding = toVector(await withOrg(orgId, () => embedText(`${title}\n${question}\n${answer}`)));
+  } catch (e) {
+    log.warn('manual article embed skipped', { error: e instanceof Error ? e.message : String(e) });
+  }
+
+  const { data: article, error } = await db
+    .from('kb_articles')
+    .insert({
+      org_id: orgId,
+      extraction_id: null,
+      title,
+      body,
+      category: category ?? null,
+      tags: tags ?? [],
+      embedding,
+      published_at: new Date().toISOString(),
+      version: 1,
+    })
+    .select('id')
+    .single();
+  if (error || !article) return c.json({ error: error?.message ?? 'Failed to create article' }, 500);
+
+  const articleId = article.id as string;
+  // Uploaded photos: treat each as an edited/new image to store (no source thread).
+  const imageCount = await attachArticleImages(
+    db,
+    orgId,
+    articleId,
+    null,
+    (images ?? []).map((i) => ({ editedDataUrl: i.dataUrl })),
+  );
+
+  await writeAudit({
+    orgId, userId, action: 'article.published', resource: 'kb_articles', resourceId: articleId,
+    metadata: { manual: true, images: imageCount },
+  });
+  return c.json({ id: articleId });
 });
 
 // ─── GET /api/kb/:id — read one article + its source ────────
