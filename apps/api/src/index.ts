@@ -28,7 +28,7 @@ app.use(
   cors({
     origin: allowedOrigins.length > 0 ? allowedOrigins : '*',
     allowHeaders: ['Authorization', 'Content-Type'],
-    allowMethods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   }),
 );
 app.get('/health', (c) => c.json({ status: 'ok', service: 'mailmind-api' }));

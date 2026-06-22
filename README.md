@@ -190,7 +190,13 @@ language** (pgvector semantic search + keyword fallback) and **editable**
 (an article's **Edit** moves it back to draft in Review, where text + images are
 updated and it's re-published). Articles can also be **authored from scratch** — the
 **New Article** button on `/kb` opens the same form (title/question/answer/caveats/
-category/tags) with **photo upload**, publishing directly without a ticket. A "Process Approved Threads" button on `/staging`
+category/tags) with **photo upload + crop/annotate**, publishing directly without a ticket.
+**Admins** can permanently **delete** an article (removes its DB rows + the images it
+owns in storage; copy-by-reference images shared with a source ticket are left intact).
+
+Rejecting a draft in Review sets its status to `rejected` (kept for audit). The Review
+page has a **Pending / Rejected** toggle: rejected drafts can be **restored** to the
+pending queue by any reviewer, or **permanently deleted** by an admin. A "Process Approved Threads" button on `/staging`
 triggers the pipeline.
 
 The data-heavy lists (Staging, Queued, Review, Knowledge Base) use **infinite

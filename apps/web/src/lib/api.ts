@@ -290,6 +290,16 @@ export function rejectExtraction(id: string): Promise<{ ok: boolean; status: str
   return request(`/api/extractions/${id}/reject`, { method: 'POST' });
 }
 
+// Send a rejected draft back to the pending queue.
+export function restoreExtraction(id: string): Promise<{ ok: boolean; status: string }> {
+  return request(`/api/extractions/${id}/restore`, { method: 'POST' });
+}
+
+// Permanently delete a rejected draft (admin only).
+export function deleteExtraction(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/extractions/${id}`, { method: 'DELETE' });
+}
+
 // ─── Domain facts (grounding rules) ─────────────────────────
 
 export interface DomainFact {
@@ -551,6 +561,11 @@ export function searchKb(q: string): Promise<{ mode: 'semantic' | 'keyword'; res
 
 export function unpublishArticle(id: string): Promise<{ ok: boolean; extractionId: string }> {
   return request(`/api/kb/${id}/unpublish`, { method: 'POST' });
+}
+
+// Permanently delete an article (admin only).
+export function deleteArticle(id: string): Promise<{ ok: boolean }> {
+  return request(`/api/kb/${id}`, { method: 'DELETE' });
 }
 
 // ─── Reply agent (suggested ticket replies) ─────────────────

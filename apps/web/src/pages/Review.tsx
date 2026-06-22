@@ -8,6 +8,9 @@ import {
   rejectExtraction,
   listThreadAttachments,
   getExtractionSimilar,
+  restoreExtraction,
+  deleteExtraction,
+  getMe,
   mergePreview,
   mergeApply,
   type MergeCandidate,
@@ -42,17 +45,54 @@ interface CurImage {
 // Milestone 3 Review Queue. Humans qualify AI-drafted extractions: edit the
 // title/question/answer, then approve (becomes eligible to publish) or reject.
 export function Review() {
+  const [status, setStatus] = useState<'pending_review' | 'rejected'>('pending_review');
   const { items, total, loading, error, reload: load, sentinelRef } = useInfinitePages<Extraction>(
-    (offset, limit) => listExtractions('pending_review', { offset, limit }).then((r) => ({ items: r.extractions, total: r.total })),
-    'review',
+    (offset, limit) => listExtractions(status, { offset, limit }).then((r) => ({ items: r.extractions, total: r.total })),
+    status,
   );
   const [openId, setOpenId] = useState<string | null>(null);
   const [similarFlags, setSimilarFlags] = useState<Set<string>>(new Set());
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const isRejected = status === 'rejected';
+
+  useEffect(() => {
+    void getMe().then((me) => setIsAdmin(me.role === 'admin')).catch(() => {});
+  }, []);
+
+  async function onRestore(id: string) {
+    setBusyId(id);
+    setActionError(null);
+    try {
+      await restoreExtraction(id);
+      void load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to restore draft');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function onDeleteRejected(id: string) {
+    if (!confirm('Permanently delete this rejected draft? This cannot be undone.')) return;
+    setBusyId(id);
+    setActionError(null);
+    try {
+      await deleteExtraction(id);
+      void load();
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : 'Failed to delete draft');
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   // Flag drafts that closely match an existing published article (best-effort).
+  // Only meaningful for the pending queue.
   useEffect(() => {
     let active = true;
-    if (items.length === 0) {
+    if (isRejected || items.length === 0) {
       setSimilarFlags(new Set());
       return;
     }
@@ -71,7 +111,7 @@ export function Review() {
     return () => {
       active = false;
     };
-  }, [items]);
+  }, [items, isRejected]);
 
   return (
     <div className="mx-auto max-w-6xl p-6">
@@ -88,7 +128,9 @@ export function Review() {
           </nav>
           <h1 className="text-2xl font-semibold text-gray-900">Review Queue</h1>
           <p className="text-sm text-gray-500">
-            {total} draft{total === 1 ? '' : 's'} awaiting review — edit, then approve or reject.
+            {isRejected
+              ? `${total} rejected draft${total === 1 ? '' : 's'} — restore to re-review${isAdmin ? ', or delete to purge' : ''}.`
+              : `${total} draft${total === 1 ? '' : 's'} awaiting review — edit, then approve or reject.`}
           </p>
         </div>
         <button
@@ -99,9 +141,25 @@ export function Review() {
         </button>
       </header>
 
-      {error && (
+      {/* Pending / Rejected toggle */}
+      <div className="mb-3 flex gap-1 text-sm">
+        <button
+          onClick={() => setStatus('pending_review')}
+          className={`rounded px-3 py-1.5 ${!isRejected ? 'bg-gray-900 text-white' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+        >
+          Pending
+        </button>
+        <button
+          onClick={() => setStatus('rejected')}
+          className={`rounded px-3 py-1.5 ${isRejected ? 'bg-gray-900 text-white' : 'border border-gray-300 text-gray-700 hover:bg-gray-50'}`}
+        >
+          Rejected
+        </button>
+      </div>
+
+      {(error ?? actionError) && (
         <div className="mb-4 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
+          {error ?? actionError}
         </div>
       )}
 
@@ -114,21 +172,28 @@ export function Review() {
               <th className="px-3 py-2">Confidence</th>
               <th className="px-3 py-2">Tags</th>
               <th className="px-3 py-2">Created</th>
+              {isRejected && <th className="px-3 py-2">Actions</th>}
             </tr>
           </thead>
           <tbody>
             {loading && items.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
+              <tr><td colSpan={isRejected ? 6 : 5} className="px-3 py-6 text-center text-gray-400">Loading…</td></tr>
             ) : items.length === 0 ? (
-              <tr><td colSpan={5} className="px-3 py-6 text-center text-gray-400">No drafts to review. Queue threads in Staging, then run the pipeline.</td></tr>
+              <tr><td colSpan={isRejected ? 6 : 5} className="px-3 py-6 text-center text-gray-400">
+                {isRejected ? 'No rejected drafts.' : 'No drafts to review. Queue threads in Staging, then run the pipeline.'}
+              </td></tr>
             ) : (
               items.map((x) => (
                 <tr key={x.id} className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="px-3 py-2">
-                    <button onClick={() => setOpenId(x.id)} className="text-left font-medium text-blue-700 hover:underline">
-                      {x.title || '(untitled)'}
-                    </button>
-                    {similarFlags.has(x.id) && (
+                    {isRejected ? (
+                      <span className="font-medium text-gray-800">{x.title || '(untitled)'}</span>
+                    ) : (
+                      <button onClick={() => setOpenId(x.id)} className="text-left font-medium text-blue-700 hover:underline">
+                        {x.title || '(untitled)'}
+                      </button>
+                    )}
+                    {!isRejected && similarFlags.has(x.id) && (
                       <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800" title="A similar published article exists">
                         ⚠ similar
                       </span>
@@ -138,6 +203,28 @@ export function Review() {
                   <td className="px-3 py-2 text-gray-600">{fmtConfidence(x.confidence)}</td>
                   <td className="px-3 py-2 text-gray-600">{x.tags.slice(0, 3).join(', ')}{x.tags.length > 3 ? '…' : ''}</td>
                   <td className="px-3 py-2 text-gray-500">{fmtDateTime(x.created_at)}</td>
+                  {isRejected && (
+                    <td className="px-3 py-2">
+                      <div className="flex gap-1">
+                        <button
+                          onClick={() => void onRestore(x.id)}
+                          disabled={busyId === x.id}
+                          className="rounded border border-gray-300 px-2 py-0.5 text-xs text-blue-700 hover:bg-gray-50 disabled:opacity-40"
+                        >
+                          Restore
+                        </button>
+                        {isAdmin && (
+                          <button
+                            onClick={() => void onDeleteRejected(x.id)}
+                            disabled={busyId === x.id}
+                            className="rounded border border-red-300 bg-red-50 px-2 py-0.5 text-xs text-red-700 hover:bg-red-100 disabled:opacity-40"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               ))
             )}

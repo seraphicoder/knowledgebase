@@ -15,6 +15,7 @@ import {
   flagArticle,
   unflagArticle,
   createArticle,
+  deleteArticle,
   getMe,
   type KbArticleSummary,
   type KbArticleDetail,
@@ -41,10 +42,16 @@ export function KB() {
   const [results, setResults] = useState<{ mode: string; results: KbSearchResult[] } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [canAuthor, setCanAuthor] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const [showNew, setShowNew] = useState(false);
 
   useEffect(() => {
-    void getMe().then((me) => setCanAuthor(!!me.role && AUTHOR_ROLES.has(me.role))).catch(() => {});
+    void getMe()
+      .then((me) => {
+        setCanAuthor(!!me.role && AUTHOR_ROLES.has(me.role));
+        setIsAdmin(me.role === 'admin');
+      })
+      .catch(() => {});
   }, []);
 
   // Deep-link: /kb?article=<id> opens that article (e.g. from a Review warning).
@@ -201,7 +208,14 @@ export function KB() {
         </div>
       )}
 
-      {openId && <ArticleDrawer id={openId} onClose={() => setOpenId(null)} />}
+      {openId && (
+        <ArticleDrawer
+          id={openId}
+          isAdmin={isAdmin}
+          onClose={() => setOpenId(null)}
+          onDeleted={() => { setOpenId(null); reload(); }}
+        />
+      )}
       {showNew && (
         <NewArticleDrawer
           onClose={() => setShowNew(false)}
@@ -212,7 +226,7 @@ export function KB() {
   );
 }
 
-function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+function ArticleDrawer({ id, isAdmin, onClose, onDeleted }: { id: string; isAdmin: boolean; onClose: () => void; onDeleted: () => void }) {
   const [article, setArticle] = useState<KbArticleDetail | null>(null);
   const [source, setSource] = useState<{ id: string; subject: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -291,6 +305,20 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
     }
   }
 
+  async function onDelete() {
+    if (!article) return;
+    if (!confirm('Permanently delete this article? This cannot be undone.')) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await deleteArticle(article.id);
+      onDeleted();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete article');
+      setBusy(false);
+    }
+  }
+
   useEffect(() => {
     let active = true;
     getKbArticle(id)
@@ -343,6 +371,11 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
                 {busy ? '…' : 'Edit'}
               </button>
               <button onClick={download} className="rounded border border-gray-300 px-2 py-0.5 hover:bg-gray-50">Download .md</button>
+              {isAdmin && (
+                <button onClick={() => void onDelete()} disabled={busy} className="rounded border border-red-300 bg-red-50 px-2 py-0.5 text-red-700 hover:bg-red-100 disabled:opacity-40">
+                  Delete
+                </button>
+              )}
             </div>
 
             {article.needs_update && (

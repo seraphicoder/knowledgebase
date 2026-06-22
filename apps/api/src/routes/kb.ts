@@ -99,6 +99,44 @@ kb.post('/kb/articles', async (c) => {
   return c.json({ id: articleId });
 });
 
+// ─── DELETE /api/kb/:id — permanently delete an article (admin) ──
+kb.delete('/kb/:id', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (role !== 'admin') return c.json({ error: 'Admin access required' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing article id' }, 400);
+  const db = getServiceClient();
+
+  const { data: article } = await db.from('kb_articles').select('id').eq('org_id', orgId).eq('id', id).single();
+  if (!article) return c.json({ error: 'Article not found' }, 404);
+
+  // Remove only storage objects this article OWNS (uploaded/edited images live
+  // under /articles/<id>/). Copy-by-reference images share a thread attachment's
+  // object — leave those so the source attachment isn't broken.
+  const { data: imgs } = await db
+    .from('kb_article_images')
+    .select('storage_path')
+    .eq('org_id', orgId)
+    .eq('kb_article_id', id);
+  const owned = (imgs ?? [])
+    .map((r) => r.storage_path as string)
+    .filter((p) => p.includes(`/articles/${id}/`));
+  if (owned.length > 0) {
+    const { error: rmErr } = await db.storage.from('attachments').remove(owned);
+    if (rmErr) log.warn('article image storage cleanup failed', { error: rmErr.message });
+  }
+
+  // kb_article_images rows cascade on the article delete (FK on delete cascade).
+  const { error } = await db.from('kb_articles').delete().eq('org_id', orgId).eq('id', id);
+  if (error) return c.json({ error: error.message }, 500);
+
+  await writeAudit({
+    orgId, userId, action: 'article.deleted', resource: 'kb_articles', resourceId: id,
+    metadata: { imagesRemoved: owned.length },
+  });
+  return c.json({ ok: true });
+});
+
 // ─── GET /api/kb/:id — read one article + its source ────────
 kb.get('/kb/:id', async (c: Context<{ Variables: AuthVars }>) => {
   const { orgId } = c.get('auth');

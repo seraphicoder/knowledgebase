@@ -340,3 +340,52 @@ review.post('/extractions/:id/reject', async (c: Context<{ Variables: AuthVars }
   });
   return c.json({ ok: true, status: 'rejected' });
 });
+
+// ─── POST /api/extractions/:id/restore — send a rejected draft back ──
+review.post('/extractions/:id/restore', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (!canReview(role)) return c.json({ error: 'Only reviewers can qualify drafts' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing extraction id' }, 400);
+  const db = getServiceClient();
+
+  const { data, error } = await db
+    .from('extractions')
+    .update({ status: 'pending_review', reviewed_by: null, reviewed_at: null })
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .eq('status', 'rejected')
+    .select('id');
+  if (error) return c.json({ error: error.message }, 500);
+  if (!data || data.length === 0) return c.json({ error: 'No rejected extraction with that id' }, 404);
+
+  await writeAudit({
+    orgId, userId, action: 'extraction.restored', resource: 'extractions', resourceId: id,
+  });
+  return c.json({ ok: true, status: 'pending_review' });
+});
+
+// ─── DELETE /api/extractions/:id — purge a rejected draft (admin) ──
+review.delete('/extractions/:id', async (c: Context<{ Variables: AuthVars }>) => {
+  const { orgId, userId, role } = c.get('auth');
+  if (role !== 'admin') return c.json({ error: 'Admin access required' }, 403);
+  const id = c.req.param('id');
+  if (!id) return c.json({ error: 'Missing extraction id' }, 400);
+  const db = getServiceClient();
+
+  // Only rejected drafts are purgeable — never pending/published/merged.
+  const { data, error } = await db
+    .from('extractions')
+    .delete()
+    .eq('org_id', orgId)
+    .eq('id', id)
+    .eq('status', 'rejected')
+    .select('id');
+  if (error) return c.json({ error: error.message }, 500);
+  if (!data || data.length === 0) return c.json({ error: 'No rejected extraction with that id' }, 404);
+
+  await writeAudit({
+    orgId, userId, action: 'extraction.deleted', resource: 'extractions', resourceId: id,
+  });
+  return c.json({ ok: true });
+});
