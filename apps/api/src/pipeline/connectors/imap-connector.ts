@@ -39,59 +39,31 @@ export class ImapConnector implements Connector {
   }
 
   async fetchConversations(cursor: string | null, options?: FetchOptions): Promise<FetchPage> {
-    return withRetry(() => this.fetchOnce(cursor, options?.limit, options?.isKnown), {
+    return withRetry(() => this.fetchOnce(cursor, options?.limit), {
       label: 'imap.fetch',
       maxAttempts: 3,
       baseDelayMs: 1000,
     });
   }
 
-  // Newest-first by UID. The cursor is the lowest UID ingested so far; each run
-  // takes the newest `limit` messages older than it and reports the next cursor
-  // to continue further back. null cursor = start from the newest message.
-  //
-  // Incremental "pull new": when `isKnown` is supplied we read each candidate's
-  // Message-ID from the cheap envelope BEFORE downloading the full body, and stop
-  // at the first already-ingested message (newest-first ⇒ everything older is known).
-  private async fetchOnce(
-    cursor: string | null,
-    limit?: number,
-    isKnown?: (externalId: string) => Promise<boolean> | boolean,
-  ): Promise<FetchPage> {
+  // Forward sync by UID (IMAP UIDs increase as mail arrives, so higher = newer).
+  // The cursor is the highest UID ingested so far; each run takes the oldest
+  // `limit` messages with a UID GREATER than the cursor and advances it. null
+  // cursor = start from the beginning. Run repeatedly to walk forward through
+  // history, then it parks at the newest and only picks up newer mail.
+  private async fetchOnce(cursor: string | null, limit?: number): Promise<FetchPage> {
     const client = this.newClient();
     const conversations: RawConversation[] = [];
     await client.connect();
     const lock = await client.getMailboxLock(this.config.mailbox ?? 'INBOX');
-    let nextCursor: string | null = null;
-    let stoppedAtKnown = false;
+    let nextCursor: string | null = cursor;
+    let hasMore = false;
     try {
       const allUids = (await client.search({ all: true }, { uid: true })) || [];
-      const cursorUid = cursor ? Number(cursor) : Infinity;
-      const candidates = allUids.filter((u) => u < cursorUid).sort((a, b) => b - a); // newest first
-
-      // Decide which UIDs to fully download. Backfill: just the newest `limit`.
-      // Incremental: check Message-IDs via envelopes and stop at the first known.
-      let take: number[];
-      if (isKnown) {
-        const window = limit !== undefined ? candidates.slice(0, limit) : candidates;
-        const idByUid = new Map<number, string>();
-        if (window.length > 0) {
-          for await (const m of client.fetch(window.join(','), { envelope: true }, { uid: true })) {
-            idByUid.set(m.uid, (m.envelope?.messageId ?? `${m.uid}@${this.config.host}`).trim());
-          }
-        }
-        take = [];
-        for (const uid of window) {
-          const extId = idByUid.get(uid) ?? `${uid}@${this.config.host}`;
-          if (await isKnown(extId)) {
-            stoppedAtKnown = true;
-            break;
-          }
-          take.push(uid);
-        }
-      } else {
-        take = limit !== undefined ? candidates.slice(0, limit) : candidates;
-      }
+      const cursorUid = cursor ? Number(cursor) : 0;
+      const candidates = allUids.filter((u) => u > cursorUid).sort((a, b) => a - b); // oldest-of-new first
+      const take = limit !== undefined ? candidates.slice(0, limit) : candidates;
+      hasMore = candidates.length > take.length;
 
       if (take.length > 0) {
         for await (const msg of client.fetch(take.join(','), { source: true, envelope: true }, { uid: true })) {
@@ -123,20 +95,16 @@ export class ImapConnector implements Connector {
             },
           });
         }
-        // IMAP fetch may return in ascending order — enforce newest-first.
-        conversations.sort((a, b) => b.messages[0]!.timestamp.getTime() - a.messages[0]!.timestamp.getTime());
-        // More history remains only if we capped a larger candidate set.
-        const lowestTaken = take[take.length - 1]!;
-        nextCursor = candidates.length > take.length ? String(lowestTaken) : null;
+        // take is ascending, so its last UID is the highest consumed — the new
+        // forward high-water mark to resume past next time.
+        nextCursor = String(take[take.length - 1]!);
       }
-      // Caught up (hit a known message) overrides any resume cursor.
-      if (stoppedAtKnown) nextCursor = null;
     } finally {
       lock.release();
       await client.logout();
     }
-    log.info('IMAP fetch complete', { count: conversations.length, cursor, nextCursor, stoppedAtKnown });
-    return { conversations, nextCursor };
+    log.info('IMAP fetch complete', { count: conversations.length, cursor, nextCursor, hasMore });
+    return { conversations, nextCursor, hasMore };
   }
 }
 

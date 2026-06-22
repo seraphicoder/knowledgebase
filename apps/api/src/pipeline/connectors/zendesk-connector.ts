@@ -84,55 +84,44 @@ export class ZendeskConnector implements Connector {
     }
   }
 
-  // Newest-first. The tickets LIST endpoint is cheap (one call per page of ids);
-  // the expensive work is per-ticket (comments + attachment downloads + user
-  // lookups). So we page the list and, for each ticket, check `isKnown` BEFORE
-  // any heavy fetch — stopping at the first already-ingested ticket (incremental
-  // "pull new"). Without `isKnown` this is a full fetch up to `limit` (backfill).
-  // Ordering uses sort_by=created_at&sort_order=desc (the Tickets endpoint
-  // rejects the `sort=-created_at` shorthand with a 400).
+  // Forward sync. Zendesk cursor pagination returns tickets oldest→newest and the
+  // `after_cursor` advances forward; `cursor` is that token (null = start of
+  // history). We size each page to the exact remaining need so the after_cursor
+  // always aligns to the tickets we actually consumed (never skip a partial page),
+  // consume whole pages, and return the latest after_cursor as the resume token —
+  // even at the end, so a later run picks up only newer tickets.
   async fetchConversations(cursor: string | null, options?: FetchOptions): Promise<FetchPage> {
     const limit = options?.limit;
-    const isKnown = options?.isKnown;
     const conversations: RawConversation[] = [];
     let after = cursor;
     let hasMore = true;
-    let stoppedAtKnown = false;
 
-    pages: while (hasMore && (limit === undefined || conversations.length < limit)) {
+    while (hasMore && (limit === undefined || conversations.length < limit)) {
       const size = limit === undefined ? PAGE_MAX : Math.min(limit - conversations.length, PAGE_MAX);
       const page = await this.get<TicketsCursorResponse>(this.ticketsPagePath(size, after));
-
       for (const ticket of page.tickets) {
-        // Cheap existence check before any expensive per-ticket fetch.
-        if (isKnown && (await isKnown(String(ticket.id)))) {
-          stoppedAtKnown = true;
-          break pages;
-        }
         const comments = await this.fetchComments(ticket.id);
         conversations.push(await this.toConversation(ticket, comments));
         await sleep(RATE_LIMIT_DELAY_MS);
-        if (limit !== undefined && conversations.length >= limit) break;
       }
-
       after = page.meta.after_cursor;
       hasMore = page.meta.has_more;
       if (hasMore && (limit === undefined || conversations.length < limit)) await sleep(RATE_LIMIT_DELAY_MS);
     }
 
-    // Caught up (hit a known ticket) or no more history => null. Otherwise the
-    // cursor to continue further back (cap reached mid-history).
-    const nextCursor = stoppedAtKnown || !hasMore ? null : after;
+    // `after` is the forward resume token (advances past the last record at the
+    // end of history). Keep it so the next run fetches only newer tickets.
     log.info('Zendesk fetch complete', {
-      tickets: conversations.length, limit: limit ?? null, stoppedAtKnown, nextCursor: nextCursor ?? null,
+      tickets: conversations.length, limit: limit ?? null, hasMore, nextCursor: after ?? null,
     });
-    return { conversations, nextCursor };
+    return { conversations, nextCursor: after, hasMore };
   }
 
   private ticketsPagePath(size: number, after: string | null): string {
-    // Newest-first. The Tickets endpoint uses sort_by/sort_order — NOT the
-    // `sort=-created_at` shorthand, which it rejects with a 400.
-    const parts = [`page[size]=${size}`, 'sort_by=created_at', 'sort_order=desc'];
+    // Forward (oldest→newest). Cursor pagination returns ascending by id and the
+    // after_cursor advances forward regardless of sort params; we request
+    // sort_by/sort_order=asc to match (the `sort=-created_at` shorthand 400s).
+    const parts = [`page[size]=${size}`, 'sort_by=created_at', 'sort_order=asc'];
     if (after) parts.push(`page[after]=${encodeURIComponent(after)}`);
     return `/api/v2/tickets.json?${parts.join('&')}`;
   }

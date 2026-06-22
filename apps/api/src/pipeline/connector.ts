@@ -33,40 +33,38 @@ export interface RawAttachment {
 
 export interface FetchOptions {
   /**
-   * Cap the number of conversations pulled in this run. Used to verify the
-   * pipeline on a small batch instead of sweeping a large backlog at once.
-   * Connectors must stop fetching early once the cap is reached, not fetch
-   * everything and truncate.
+   * Cap the number of conversations pulled in this run. Used to walk a large
+   * backlog in batches instead of one sweep. Connectors must stop fetching once
+   * the cap is reached, not fetch everything and truncate.
    */
   limit?: number;
-  /**
-   * Incremental "pull new" hook. When provided, the connector — walking
-   * newest-first — checks each conversation's external id BEFORE doing any
-   * expensive per-item work (comment/attachment fetches). The first time it
-   * returns true the connector STOPS: newest-first ordering means everything
-   * older has already been ingested. Omitted = full fetch (backfill).
-   */
-  isKnown?: (externalId: string) => Promise<boolean> | boolean;
 }
 
 export interface FetchPage {
-  /** Newest-first: the most recent conversations are at the front. */
   conversations: RawConversation[];
   /**
-   * Opaque, connector-defined token to resume the backfill on the next run,
-   * continuing FURTHER BACK in time. null means there is no older history left
-   * (backfill complete).
+   * Forward high-water mark to persist (ingestion_sources.sync_cursor) and pass
+   * back on the next run to fetch records created AFTER this point. It always
+   * advances forward — at the end of history it points just past the last record,
+   * so a later call returns only genuinely-new records. null only when the source
+   * has no records at all.
    */
   nextCursor: string | null;
+  /** True if more records remain beyond this page right now (the `limit` cap was
+   * hit with more available). False once the current end of history is reached. */
+  hasMore: boolean;
 }
 
 export interface Connector {
   type: string; // 'imap' | 'zendesk' | ...
   /**
-   * Pulls a page of conversations newest-first, walking backwards in time.
-   * `cursor` is the opaque token returned by the previous call (null to start
-   * from the newest record). Connectors return conversations ordered newest →
-   * oldest plus the cursor to continue further back.
+   * Forward sync: pulls conversations created AFTER `cursor`, oldest-of-the-new
+   * first, up to `options.limit`. `cursor` is the opaque token from the previous
+   * call (null to start from the beginning of history). Returns the records plus
+   * an advanced `nextCursor` and whether more remain right now (`hasMore`).
+   *
+   * Run repeatedly: it walks forward through all history, then parks at the end —
+   * subsequent calls fetch only records newer than everything seen so far.
    */
   fetchConversations(cursor: string | null, options?: FetchOptions): Promise<FetchPage>;
   testConnection(): Promise<boolean>;

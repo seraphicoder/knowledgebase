@@ -168,9 +168,9 @@ export function Sources() {
               disabled={running}
               className="w-20 rounded border border-gray-300 px-2 py-1.5 text-sm disabled:opacity-50"
               placeholder="25"
-              title="Cap on NEW tickets pulled per source. Pulls are incremental: newest-first, stopping at the first already-imported ticket — so a caught-up source finishes almost instantly."
+              title="Cap on records pulled per source this run. Pulls resume each source's cursor and move forward, so once you're caught up it only fetches genuinely-new records. Click again to continue forward."
             />
-            new / source
+            / run
           </label>
           <button
             onClick={() => void onIngestAll()}

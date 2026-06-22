@@ -1,13 +1,13 @@
 // Runs the full Milestone 1 ingestion path against one connector and prints the
 // result. Usage:
-//   npm run ingest -- --source=zendesk
-//   npm run ingest -- --source=zendesk --limit=25     # pull only 25 this run
+//   npm run ingest -- --source=zendesk                 # pull forward to the end
+//   npm run ingest -- --source=zendesk --limit=25      # pull only 25 this run
 //   npm run ingest -- --source=imap --source-id=<uuid> --org-id=<uuid>
 //
-// --limit caps how many conversations are pulled, so you can verify the process
-// on a small batch instead of sweeping a large backlog. Ingestion pulls
-// NEWEST-FIRST and walks backwards in time; re-running continues further back,
-// so repeated limited runs walk the history N at a time until it's exhausted.
+// FORWARD SYNC: each run resumes the source's saved cursor and pulls records
+// created AFTER it (oldest-of-the-new first), advancing the cursor. Run with no
+// --limit to walk all the way to the end in one pass; once caught up, re-running
+// fetches only genuinely-new records (no duplicate churn). --limit caps a run.
 //
 // This script performs NO AI calls — it exercises ingestion only. It works with
 // ANTHROPIC_API_KEY and OPENAI_API_KEY absent; if it fails without them, there
@@ -71,8 +71,8 @@ async function main(): Promise<void> {
   console.log(
     `\nDone: ${result.inserted} staged, ${result.duplicatesSkipped} duplicates skipped.\n` +
       (result.backfillComplete
-        ? 'Backfill complete — no older history left to pull.'
-        : 'More history remains — re-run to pull the next (older) batch.'),
+        ? 'Caught up — cursor parked at the end; re-run to pull new records as they arrive.'
+        : 'More records remain — re-run to pull the next batch forward.'),
   );
 }
 

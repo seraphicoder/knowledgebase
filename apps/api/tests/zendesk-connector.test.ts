@@ -50,12 +50,12 @@ describe('zendesk-connector', () => {
     expect(c.metadata.tags).toEqual(['login', 'auth']);
   });
 
-  it('requests newest-first (sort_by=created_at&sort_order=desc)', async () => {
+  it('requests forward order (sort_by=created_at&sort_order=asc)', async () => {
     let sawSort = false;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
       if (url.includes('/api/v2/tickets.json')) {
-        if (url.includes('sort_by=created_at') && url.includes('sort_order=desc')) sawSort = true;
+        if (url.includes('sort_by=created_at') && url.includes('sort_order=asc')) sawSort = true;
         return jsonResponse(cursorPage([ticket(1)], null, false));
       }
       if (url.includes('/comments.json')) return jsonResponse({ comments: [], next_page: null });
@@ -67,7 +67,7 @@ describe('zendesk-connector', () => {
     expect(sawSort).toBe(true);
   });
 
-  it('follows the after_cursor across pages until has_more is false', async () => {
+  it('follows the after_cursor across pages and keeps the end cursor for forward resume', async () => {
     let calls = 0;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
@@ -82,9 +82,10 @@ describe('zendesk-connector', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const { conversations, nextCursor } = await connector().fetchConversations(null);
+    const { conversations, nextCursor, hasMore } = await connector().fetchConversations(null);
     expect(conversations.map((c) => c.externalId)).toEqual(['10', '9']);
-    expect(nextCursor).toBeNull(); // has_more was false on the last page
+    expect(hasMore).toBe(false); // reached the end of history
+    expect(nextCursor).toBe('CUR2'); // kept so the next run pulls only newer records
     expect(calls).toBe(2);
   });
 
@@ -109,44 +110,7 @@ describe('zendesk-connector', () => {
     expect(nextCursor).toBe('NEXT'); // resume token for the next (older) batch
   });
 
-  it('incremental: stops at the first already-known ticket without fetching its comments', async () => {
-    let commentCalls = 0;
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes('/api/v2/tickets.json')) return jsonResponse(cursorPage([ticket(10), ticket(9)], 'CUR', true));
-      if (url.includes('/comments.json')) {
-        commentCalls++;
-        return jsonResponse({ comments: [], next_page: null });
-      }
-      throw new Error(`unexpected url ${url}`);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { conversations, nextCursor } = await connector().fetchConversations(null, {
-      isKnown: (id) => id === '10', // newest is already ingested
-    });
-    expect(conversations).toHaveLength(0);
-    expect(commentCalls).toBe(0); // never did the expensive per-ticket fetch
-    expect(nextCursor).toBeNull(); // caught up
-  });
-
-  it('incremental: pulls new tickets newest-first and stops at the first known one', async () => {
-    const fetchMock = vi.fn(async (input: string | URL | Request) => {
-      const url = String(input);
-      if (url.includes('/api/v2/tickets.json')) return jsonResponse(cursorPage([ticket(12), ticket(11), ticket(10)], 'CUR', true));
-      if (url.includes('/comments.json')) return jsonResponse({ comments: [], next_page: null });
-      throw new Error(`unexpected url ${url}`);
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const { conversations, nextCursor } = await connector().fetchConversations(null, {
-      isKnown: (id) => id === '10', // 12 and 11 are new; 10 is known
-    });
-    expect(conversations.map((c) => c.externalId)).toEqual(['12', '11']);
-    expect(nextCursor).toBeNull();
-  });
-
-  it('passes the cursor through as page[after] to resume further back', async () => {
+  it('passes the cursor through as page[after] to resume forward', async () => {
     let sawAfter: string | null = null;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);

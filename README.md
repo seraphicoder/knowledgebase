@@ -54,10 +54,13 @@ Sources can be managed two ways:
   (IMAP) sources, encrypts credentials server-side, tests the connection, and pulls from
   **all active sources together** ("Pull new tickets", backgrounded). Each ticket records
   which source it came from; Staging/Queued show a **Zendesk/Email badge** and a source filter.
-  In-app pulls are **incremental**: newest-first, checking each ticket's id *before* the
-  expensive comment/attachment fetch and **stopping at the first already-imported ticket** —
-  so a caught-up source finishes almost instantly instead of re-fetching known tickets. The
-  **Max new / source** input caps how many genuinely-new tickets a single run pulls (default 25).
+  Ingestion is a **forward-cursor sync**: each pull resumes the source's saved cursor and
+  fetches records created *after* it (oldest-of-the-new first), advancing the cursor. Run it
+  to walk forward through history; once caught up, the cursor parks at the end and subsequent
+  pulls fetch **only genuinely-new records** (no duplicate churn). The **Max / run** input caps
+  a single run (default 25); the cursor advances either way, so clicking again continues forward.
+  (Both connectors are forward: Zendesk by the cursor-pagination `after_cursor` — its list is
+  oldest→newest regardless of sort params — and IMAP by ascending UID.)
 - **CLI** (below) — for scripted/local runs.
 
 First, store encrypted credentials on a seeded source (reads them from `.env`,

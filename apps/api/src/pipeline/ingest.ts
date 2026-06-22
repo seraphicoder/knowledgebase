@@ -11,14 +11,8 @@ import { log } from '../lib/logger.js';
 // It must run end-to-end with ANTHROPIC_API_KEY and OPENAI_API_KEY absent.
 
 export interface IngestOptions {
-  /** Cap conversations pulled this run; resumes forward on the next run. */
+  /** Cap conversations pulled this run; the forward cursor resumes on the next run. */
   limit?: number;
-  /**
-   * Incremental "pull new": start from the newest record and stop at the first
-   * already-ingested conversation (skips the expensive per-item fetch for known
-   * ones). Does NOT advance the backward backfill cursor. Omitted = backfill.
-   */
-  incremental?: boolean;
 }
 
 export interface IngestResult extends StoreResult {
@@ -31,38 +25,19 @@ export async function ingestSource(
   options: IngestOptions = {},
 ): Promise<IngestResult> {
   const db = getServiceClient();
-  const incremental = options.incremental ?? false;
 
-  // Incremental "pull new" starts from the newest record and stops at the first
-  // already-ingested conversation. Backfill resumes the backwards walk from the
-  // saved cursor.
-  let cursor: string | null = null;
-  if (!incremental) {
-    const { data: row } = await db
-      .from('ingestion_sources')
-      .select('sync_cursor')
-      .eq('id', source.id)
-      .single();
-    cursor = (row?.sync_cursor as string | null) ?? null;
-  }
-
-  // Cheap existence check used by the connector to skip/stop on known items.
-  const isKnown = incremental
-    ? async (externalId: string): Promise<boolean> => {
-        const { count } = await db
-          .from('email_threads')
-          .select('id', { count: 'exact', head: true })
-          .eq('org_id', source.org_id)
-          .eq('source_id', source.id)
-          .eq('external_thread_id', externalId);
-        return (count ?? 0) > 0;
-      }
-    : undefined;
+  // Forward sync: resume from the saved cursor and pull records created after it.
+  const { data: row } = await db
+    .from('ingestion_sources')
+    .select('sync_cursor')
+    .eq('id', source.id)
+    .single();
+  const cursor = (row?.sync_cursor as string | null) ?? null;
 
   const connector = createConnector(source);
   const startedAt = new Date();
 
-  const page = await connector.fetchConversations(cursor, { limit: options.limit, isKnown });
+  const page = await connector.fetchConversations(cursor, { limit: options.limit });
   const threads = reconstructThreads(page.conversations, source.type);
   const cleaned = threads.map(filterThread);
   const result = await storeThreads(cleaned, { orgId: source.org_id, sourceId: source.id });
@@ -70,28 +45,28 @@ export async function ingestSource(
   // Persist image attachments for the newly stored threads (no AI; storage only).
   await storeAttachments(cleaned, result.insertedThreads, { orgId: source.org_id });
 
-  const backfillComplete = page.nextCursor === null;
-  // Incremental is a forward catch-up — don't disturb the backfill cursor.
-  const update: Record<string, unknown> = incremental
-    ? { last_synced_at: startedAt.toISOString(), status: 'active' }
-    : {
-        last_synced_at: startedAt.toISOString(),
-        sync_cursor: page.nextCursor,
-        backfill_complete: backfillComplete,
-        status: 'active',
-      };
-  await db.from('ingestion_sources').update(update).eq('id', source.id);
+  // `caughtUp` = we've reached the end of history for now. The cursor still
+  // advances (and is persisted) so the next run fetches only newer records.
+  const caughtUp = !page.hasMore;
+  await db
+    .from('ingestion_sources')
+    .update({
+      last_synced_at: startedAt.toISOString(),
+      sync_cursor: page.nextCursor,
+      backfill_complete: caughtUp,
+      status: 'active',
+    })
+    .eq('id', source.id);
 
   log.info('source ingestion complete', {
     sourceId: source.id,
     type: source.type,
-    incremental,
     conversations: page.conversations.length,
     threads: threads.length,
     limit: options.limit ?? null,
     nextCursor: page.nextCursor,
-    backfillComplete,
+    caughtUp,
     ...result,
   });
-  return { ...result, backfillComplete };
+  return { ...result, backfillComplete: caughtUp };
 }

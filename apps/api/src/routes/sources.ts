@@ -226,9 +226,10 @@ sources.post('/sources/:id/test', async (c) => {
 const running = new Set<string>();
 const ingestSchema = z.object({ limit: z.coerce.number().int().positive().max(500).optional() });
 
-// In-app pulls are incremental (newest-first, stop at the first already-ingested
-// ticket), so a caught-up source finishes near-instantly. This caps how many NEW
-// tickets a single run will pull before stopping. Bulk backfills use the CLI.
+// Forward sync: each pull resumes the source's cursor and fetches records created
+// after it, so a caught-up source pulls only genuinely-new ones (no dup churn).
+// This caps how many records a single run pulls; the cursor advances either way,
+// so clicking again continues forward. Bulk historical catch-up: the CLI.
 const DEFAULT_INGEST_LIMIT = 25;
 // Hard cap per source so a hung/stalled connector can't wedge the run (and the
 // in-memory `running` flag) forever — the run always settles and clears the flag.
@@ -320,7 +321,7 @@ async function runIngest(orgId: string, userId: string, list: IngestionSourceRow
   const perSource: Record<string, unknown>[] = [];
   for (const src of list) {
     try {
-      const r = await withTimeout(ingestSource(src, { limit, incremental: true }), PER_SOURCE_TIMEOUT_MS, `ingest ${src.type}`);
+      const r = await withTimeout(ingestSource(src, { limit }), PER_SOURCE_TIMEOUT_MS, `ingest ${src.type}`);
       inserted += r.inserted;
       duplicates += r.duplicatesSkipped;
       perSource.push({ id: src.id, type: src.type, inserted: r.inserted, duplicates: r.duplicatesSkipped, backfillComplete: r.backfillComplete });
