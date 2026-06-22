@@ -22,7 +22,7 @@ platform.get('/platform/orgs', async (c) => {
   const db = getServiceClient();
   const { data: orgs, error } = await db
     .from('organizations')
-    .select('id, name, plan, suspended, created_at')
+    .select('id, name, plan, suspended, created_at, monthly_token_limit, storage_limit_bytes, monthly_ingest_limit')
     .order('created_at', { ascending: false });
   if (error) return c.json({ error: error.message }, 500);
 
@@ -187,8 +187,15 @@ platform.get('/platform/analytics', async (c) => {
   });
 });
 
-// ─── PATCH /api/platform/orgs/:id — suspend / reactivate ────
-const patchSchema = z.object({ suspended: z.boolean() });
+// ─── PATCH /api/platform/orgs/:id — suspend / set usage limits ──
+// Limit fields accept a number (cap) or null (unlimited). Omitted = unchanged.
+const limitField = z.number().int().nonnegative().nullable().optional();
+const patchSchema = z.object({
+  suspended: z.boolean().optional(),
+  monthly_token_limit: limitField,
+  storage_limit_bytes: limitField,
+  monthly_ingest_limit: limitField,
+});
 
 platform.patch('/platform/orgs/:id', async (c) => {
   const platformUserId = c.get('platformUserId');
@@ -198,18 +205,18 @@ platform.patch('/platform/orgs/:id', async (c) => {
   if (!parsed.success) return c.json({ error: 'Invalid body' }, 400);
   const db = getServiceClient();
 
-  const { data, error } = await db
-    .from('organizations')
-    .update({ suspended: parsed.data.suspended })
-    .eq('id', id)
-    .select('id')
-    .single();
+  const update: Record<string, unknown> = {};
+  const d = parsed.data;
+  if (d.suspended !== undefined) update.suspended = d.suspended;
+  if (d.monthly_token_limit !== undefined) update.monthly_token_limit = d.monthly_token_limit;
+  if (d.storage_limit_bytes !== undefined) update.storage_limit_bytes = d.storage_limit_bytes;
+  if (d.monthly_ingest_limit !== undefined) update.monthly_ingest_limit = d.monthly_ingest_limit;
+  if (Object.keys(update).length === 0) return c.json({ error: 'Nothing to update' }, 400);
+
+  const { data, error } = await db.from('organizations').update(update).eq('id', id).select('id').single();
   if (error || !data) return c.json({ error: error?.message ?? 'Org not found' }, 404);
 
-  await writeAudit({
-    orgId: id, userId: platformUserId,
-    action: parsed.data.suspended ? 'org.suspended' : 'org.reactivated',
-    resource: 'organizations', resourceId: id,
-  });
-  return c.json({ ok: true, suspended: parsed.data.suspended });
+  const action = d.suspended === true ? 'org.suspended' : d.suspended === false ? 'org.reactivated' : 'org.limits_updated';
+  await writeAudit({ orgId: id, userId: platformUserId, action, resource: 'organizations', resourceId: id, metadata: { fields: Object.keys(update) } });
+  return c.json({ ok: true });
 });

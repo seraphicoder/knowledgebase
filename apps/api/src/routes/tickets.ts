@@ -5,6 +5,7 @@ import { writeAudit } from '../lib/audit.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
 import { generateSuggestion } from '../pipeline/ticket-agent.js';
 import { embedText, toVector } from '../pipeline/embedder.js';
+import { limitBlock } from '../lib/limits.js';
 
 // Reply agent API. Generate a grounded suggested reply for a ticket (thread),
 // review/accept/edit/discard it, and score it — SME scores feed verified_pairs,
@@ -32,6 +33,9 @@ tickets.post('/tickets/:threadId/suggest', async (c: Context<{ Variables: AuthVa
     .single();
   if (error || !thread) return c.json({ error: 'Thread not found' }, 404);
 
+  const blocked = await limitBlock(orgId, ['tokens']);
+  if (blocked) return c.json({ error: blocked }, 403);
+
   try {
     const s = await generateSuggestion(orgId, {
       threadId: thread.id as string,
@@ -51,6 +55,8 @@ tickets.post('/suggestions/draft', async (c) => {
   if (!canAct(role)) return c.json({ error: 'Not permitted' }, 403);
   const parsed = draftSchema.safeParse(await c.req.json().catch(() => ({})));
   if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? 'Paste some ticket text' }, 400);
+  const blocked = await limitBlock(orgId, ['tokens']);
+  if (blocked) return c.json({ error: blocked }, 403);
   try {
     const s = await generateSuggestion(orgId, { content: parsed.data.text });
     return c.json({ suggestion: s });

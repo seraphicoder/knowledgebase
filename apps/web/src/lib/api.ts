@@ -410,6 +410,19 @@ export interface PlatformOrg {
   user_count: number;
   thread_count: number;
   article_count: number;
+  monthly_token_limit: number | null;
+  storage_limit_bytes: number | null;
+  monthly_ingest_limit: number | null;
+}
+
+export interface OrgLimitsPatch {
+  monthly_token_limit?: number | null;
+  storage_limit_bytes?: number | null;
+  monthly_ingest_limit?: number | null;
+}
+
+export function updateOrgLimits(id: string, patch: OrgLimitsPatch): Promise<{ ok: boolean }> {
+  return request(`/api/platform/orgs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 }
 
 export function listOrgs(): Promise<{ orgs: PlatformOrg[] }> {
@@ -429,7 +442,14 @@ export function setOrgSuspended(id: string, suspended: boolean): Promise<{ ok: b
 }
 
 // ─── Analytics ──────────────────────────────────────────────
+export interface LimitDimension {
+  usage: number;
+  limit: number | null;
+  exceeded: boolean;
+}
+
 export interface AnalyticsOverview {
+  limits: { tokens: LimitDimension; storage: LimitDimension; ingest: LimitDimension };
   threads: { total: number; staged: number; queued: number; excluded: number; ingestedLast30: number };
   processing: { extracted: number; skipped: number; errored: number };
   knowledge: { publishedArticles: number; draftsPendingReview: number; verifiedPairs: number };

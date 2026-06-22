@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
 import { getServiceClient } from '../lib/supabase.js';
 import { runPipeline } from '../pipeline/pipeline-runner.js';
+import { limitBlock } from '../lib/limits.js';
 import { log } from '../lib/logger.js';
 
 // Manual pipeline trigger ("Process Queued Threads"). Consistent with the
@@ -20,10 +21,14 @@ const RUN_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
 // run in flight during a redeploy is lost (acceptable without a job queue).
 const running = new Set<string>();
 
-pipeline.post('/pipeline/run', (c) => {
+pipeline.post('/pipeline/run', async (c) => {
   const { orgId, role } = c.get('auth');
   if (!RUN_ROLES.has(role)) return c.json({ error: 'Not permitted' }, 403);
   if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
+
+  // Extraction is the heaviest AI consumer — gate on the monthly token cap.
+  const blocked = await limitBlock(orgId, ['tokens']);
+  if (blocked) return c.json({ error: blocked }, 403);
 
   running.add(orgId);
   // Fire-and-forget: respond now, process in the background.

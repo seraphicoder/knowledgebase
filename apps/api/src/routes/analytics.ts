@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { getServiceClient } from '../lib/supabase.js';
 import { requireAuth, type AuthVars } from '../lib/auth.js';
+import { evaluateLimits } from '../lib/limits.js';
 
 // Org-facing analytics (admin). Deflection + usage for the CALLER's org only —
 // deliberately no cost/token/storage data (that lives in the vendor console).
@@ -61,7 +62,10 @@ analytics.get('/analytics/overview', async (c) => {
   const used = (byStatus.accepted ?? 0) + (byStatus.edited ?? 0);
   const resolved = used + (byStatus.discarded ?? 0);
 
+  const limits = await evaluateLimits(orgId);
+
   return c.json({
+    limits,
     threads: { total: threadsTotal, staged, queued, excluded, ingestedLast30: ingested30 },
     processing: { extracted, skipped, errored },
     knowledge: { publishedArticles: articles, draftsPendingReview: drafts, verifiedPairs: verified },

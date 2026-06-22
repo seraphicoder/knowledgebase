@@ -24,7 +24,7 @@ apps/
   web/                 # React + Vite + Tailwind
     src/pages/         # Login, Staging, Approved, Review, KB, Replies, Facts
     src/components/    # ImageGallery, ThreadImages/ArticleImages, ImageEditorModal (lazy)
-supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text · 016 platform admins + org suspend · 017 ai_usage + analytics RPCs
+supabase/migrations/   # 001 extensions · 002 tables · 003 RLS · 004 indexes · 005 match RPCs · 006 sync cursor · 007 domain facts · 008 attachments · 009 article images · 010 thread/pair match RPCs · 011 ad-hoc suggestions · 012 merged status · 013 comments + flag · 014 member role · 015 thread search_text · 016 platform admins + org suspend · 017 ai_usage + analytics RPCs · 018 usage limits
 ```
 
 ## Setup
@@ -117,6 +117,13 @@ Two split views (customers never see the vendor's costs):
 - **Platform console** (`/admin`, vendor) — cross-org **AI token usage** (raw input/output
   counts by model, 30-day + all-time), **storage** (summed attachment bytes), and ingestion,
   with a per-org breakdown.
+
+**Usage gates** — the vendor sets per-org caps (Platform console → **Limits**) on monthly
+AI tokens, total storage, and monthly ingestion (blank = unlimited). Enforced at the entry
+points: the pipeline run and reply agent block on the **token** cap; ingestion blocks on the
+**storage/ingest** caps ([`lib/limits.ts`](apps/api/src/lib/limits.ts)). Org admins see
+usage-vs-limit on their **Analytics** dashboard. Tokens/ingestion reset each calendar month;
+storage is an absolute total.
 
 Every model call records token counts to `ai_usage` via the recording wrappers in
 [`lib/ai.ts`](apps/api/src/lib/ai.ts) (`createMessage`/`createEmbedding`); org attribution is

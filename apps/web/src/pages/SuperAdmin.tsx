@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listOrgs, createOrg, setOrgSuspended, getPlatformAnalytics, type PlatformOrg, type PlatformAnalytics, type ModelUsage } from '../lib/api';
+import { listOrgs, createOrg, setOrgSuspended, updateOrgLimits, getPlatformAnalytics, type PlatformOrg, type PlatformAnalytics, type ModelUsage } from '../lib/api';
 import { supabase } from '../lib/supabase';
 
 function fmtNum(n: number): string {
@@ -74,6 +74,7 @@ export function SuperAdmin() {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [stats, setStats] = useState<PlatformAnalytics | null>(null);
+  const [editing, setEditing] = useState<PlatformOrg | null>(null);
 
   // Create-org form.
   const [name, setName] = useState('');
@@ -305,13 +306,21 @@ export function SuperAdmin() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <button
-                          onClick={() => void onToggleSuspend(o)}
-                          disabled={busyId === o.id}
-                          className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40"
-                        >
-                          {o.suspended ? 'Reactivate' : 'Suspend'}
-                        </button>
+                        <div className="flex justify-end gap-1">
+                          <button
+                            onClick={() => setEditing(o)}
+                            className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50"
+                          >
+                            Limits
+                          </button>
+                          <button
+                            onClick={() => void onToggleSuspend(o)}
+                            disabled={busyId === o.id}
+                            className="rounded border border-gray-300 px-2 py-1 text-xs hover:bg-gray-50 disabled:opacity-40"
+                          >
+                            {o.suspended ? 'Reactivate' : 'Suspend'}
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -321,6 +330,79 @@ export function SuperAdmin() {
           </div>
         </>
       )}
+
+      {editing && (
+        <LimitsModal
+          org={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => { setEditing(null); void load(); }}
+          onError={setError}
+        />
+      )}
+    </div>
+  );
+}
+
+const MB = 1024 * 1024;
+
+function LimitsModal({
+  org,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  org: PlatformOrg;
+  onClose: () => void;
+  onSaved: () => void;
+  onError: (m: string | null) => void;
+}) {
+  // Empty input = unlimited (null). Storage is entered in MB for usability.
+  const [tokens, setTokens] = useState(org.monthly_token_limit != null ? String(org.monthly_token_limit) : '');
+  const [storageMb, setStorageMb] = useState(org.storage_limit_bytes != null ? String(Math.round(org.storage_limit_bytes / MB)) : '');
+  const [ingest, setIngest] = useState(org.monthly_ingest_limit != null ? String(org.monthly_ingest_limit) : '');
+  const [busy, setBusy] = useState(false);
+
+  function parse(v: string): number | null {
+    const n = Number(v);
+    return v.trim() && Number.isFinite(n) && n >= 0 ? Math.round(n) : null;
+  }
+
+  async function onSave() {
+    setBusy(true);
+    onError(null);
+    try {
+      const storage = parse(storageMb);
+      await updateOrgLimits(org.id, {
+        monthly_token_limit: parse(tokens),
+        storage_limit_bytes: storage != null ? storage * MB : null,
+        monthly_ingest_limit: parse(ingest),
+      });
+      onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : 'Failed to save limits');
+      setBusy(false);
+    }
+  }
+
+  const field = 'w-full rounded border border-gray-300 px-2 py-1.5 text-sm';
+  return (
+    <div className="fixed inset-0 z-10 flex items-center justify-center bg-black/30 p-4" onClick={onClose}>
+      <div className="w-full max-w-md rounded bg-white p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-3 flex items-start justify-between">
+          <h2 className="text-lg font-semibold">Usage limits — {org.name}</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">✕</button>
+        </div>
+        <p className="mb-3 text-xs text-gray-500">Leave a field blank for unlimited. Tokens and ingestion reset each calendar month; storage is a total cap.</p>
+        <div className="space-y-3">
+          <label className="block text-sm"><span className="mb-1 block text-xs text-gray-500">Monthly AI tokens (input+output)</span><input value={tokens} onChange={(e) => setTokens(e.target.value)} placeholder="unlimited" className={field} /></label>
+          <label className="block text-sm"><span className="mb-1 block text-xs text-gray-500">Storage cap (MB)</span><input value={storageMb} onChange={(e) => setStorageMb(e.target.value)} placeholder="unlimited" className={field} /></label>
+          <label className="block text-sm"><span className="mb-1 block text-xs text-gray-500">Monthly tickets ingested</span><input value={ingest} onChange={(e) => setIngest(e.target.value)} placeholder="unlimited" className={field} /></label>
+        </div>
+        <div className="mt-4 flex gap-2">
+          <button onClick={() => void onSave()} disabled={busy} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">{busy ? 'Saving…' : 'Save limits'}</button>
+          <button onClick={onClose} className="rounded border border-gray-300 px-3 py-1.5 text-sm">Cancel</button>
+        </div>
+      </div>
     </div>
   );
 }

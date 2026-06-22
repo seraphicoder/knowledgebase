@@ -6,6 +6,7 @@ import { writeAudit } from '../lib/audit.js';
 import { encryptConfig } from '../lib/crypto.js';
 import { createConnector, type IngestionSourceRow } from '../pipeline/connector-factory.js';
 import { ingestSource } from '../pipeline/ingest.js';
+import { limitBlock } from '../lib/limits.js';
 import { log } from '../lib/logger.js';
 
 // Ingestion source management (admin). Lets an org connect Zendesk and email
@@ -249,6 +250,9 @@ sources.post('/sources/ingest', async (c) => {
   const limit = (parsed.success && parsed.data.limit) || DEFAULT_INGEST_LIMIT;
   if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
 
+  const blocked = await limitBlock(orgId, ['ingest', 'storage']);
+  if (blocked) return c.json({ error: blocked }, 403);
+
   const db = getServiceClient();
   const { data: srcs } = await db
     .from('ingestion_sources')
@@ -272,6 +276,9 @@ sources.post('/sources/:id/ingest', async (c) => {
   const parsed = ingestSchema.safeParse(await c.req.json().catch(() => ({})));
   const limit = (parsed.success && parsed.data.limit) || DEFAULT_INGEST_LIMIT;
   if (running.has(orgId)) return c.json({ ok: true, started: false, alreadyRunning: true });
+
+  const blocked = await limitBlock(orgId, ['ingest', 'storage']);
+  if (blocked) return c.json({ error: blocked }, 403);
 
   const db = getServiceClient();
   const { data: src } = await db
