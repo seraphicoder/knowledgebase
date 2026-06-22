@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import { useInfinitePages } from '../lib/useInfinitePages';
+
+// Heavy canvas editor — lazy-loaded so it stays out of the main bundle.
+const ImageEditorModal = lazy(() => import('../components/ImageEditorModal'));
 import {
   listKb,
   getKbArticle,
@@ -11,11 +14,16 @@ import {
   addComment,
   flagArticle,
   unflagArticle,
+  createArticle,
+  getMe,
   type KbArticleSummary,
   type KbArticleDetail,
   type KbSearchResult,
   type ArticleComment,
+  type NewArticleInput,
 } from '../lib/api';
+
+const AUTHOR_ROLES = new Set(['admin', 'reviewer', 'sme', 'member']);
 import { supabase } from '../lib/supabase';
 import { ArticleImages } from '../components/ThreadImages';
 
@@ -23,7 +31,7 @@ import { ArticleImages } from '../components/ThreadImages';
 // (semantic via pgvector, keyword fallback) and read them. Articles are published
 // here when a reviewer approves a draft.
 export function KB() {
-  const { items: articles, total, loading, error: loadError, sentinelRef } = useInfinitePages<KbArticleSummary>(
+  const { items: articles, total, loading, error: loadError, sentinelRef, reload } = useInfinitePages<KbArticleSummary>(
     (offset, limit) => listKb({ offset, limit }).then((r) => ({ items: r.articles, total: r.total })),
     'kb',
   );
@@ -32,6 +40,12 @@ export function KB() {
   const [searching, setSearching] = useState(false);
   const [results, setResults] = useState<{ mode: string; results: KbSearchResult[] } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [canAuthor, setCanAuthor] = useState(false);
+  const [showNew, setShowNew] = useState(false);
+
+  useEffect(() => {
+    void getMe().then((me) => setCanAuthor(!!me.role && AUTHOR_ROLES.has(me.role))).catch(() => {});
+  }, []);
 
   // Deep-link: /kb?article=<id> opens that article (e.g. from a Review warning).
   const [searchParams] = useSearchParams();
@@ -78,12 +92,22 @@ export function KB() {
           <h1 className="text-2xl font-semibold text-gray-900">Knowledge Base</h1>
           <p className="text-sm text-gray-500">Search published answers in plain language.</p>
         </div>
-        <button
-          onClick={() => void supabase.auth.signOut()}
-          className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
-        >
-          Sign out
-        </button>
+        <div className="flex items-center gap-2">
+          {canAuthor && (
+            <button
+              onClick={() => setShowNew(true)}
+              className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+            >
+              New Article
+            </button>
+          )}
+          <button
+            onClick={() => void supabase.auth.signOut()}
+            className="rounded border border-gray-300 px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            Sign out
+          </button>
+        </div>
       </header>
 
       <form onSubmit={onSearch} className="mb-4 flex gap-2">
@@ -178,6 +202,12 @@ export function KB() {
       )}
 
       {openId && <ArticleDrawer id={openId} onClose={() => setOpenId(null)} />}
+      {showNew && (
+        <NewArticleDrawer
+          onClose={() => setShowNew(false)}
+          onCreated={() => { setShowNew(false); reload(); }}
+        />
+      )}
     </div>
   );
 }
@@ -357,6 +387,160 @@ function ArticleDrawer({ id, onClose }: { id: string; onClose: () => void }) {
         )}
       </div>
     </div>
+  );
+}
+
+// Author a new article from scratch — same fields as the review form, plus
+// directly-uploaded photos. Published immediately on submit.
+function NewArticleDrawer({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+  const [title, setTitle] = useState('');
+  const [question, setQuestion] = useState('');
+  const [answer, setAnswer] = useState('');
+  const [caveats, setCaveats] = useState('');
+  const [category, setCategory] = useState('');
+  const [tags, setTags] = useState('');
+  const [photos, setPhotos] = useState<string[]>([]); // data URLs
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function onAddFiles(files: FileList | null) {
+    if (!files) return;
+    const reads = await Promise.all(
+      Array.from(files)
+        .filter((f) => f.type.startsWith('image/'))
+        .map(
+          (f) =>
+            new Promise<string>((resolve, reject) => {
+              const r = new FileReader();
+              r.onload = () => resolve(String(r.result));
+              r.onerror = () => reject(r.error);
+              r.readAsDataURL(f);
+            }),
+        ),
+    );
+    setPhotos((p) => [...p, ...reads]);
+  }
+
+  async function onSubmit() {
+    if (!title.trim() || !question.trim() || !answer.trim()) {
+      setError('Title, question, and answer are required.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const input: NewArticleInput = {
+        title: title.trim(),
+        question: question.trim(),
+        answer: answer.trim(),
+        caveats: caveats.trim() || undefined,
+        category: category.trim() || undefined,
+        tags: tags.split(',').map((t) => t.trim()).filter(Boolean),
+        images: photos.map((dataUrl) => ({ dataUrl })),
+      };
+      await createArticle(input);
+      onCreated();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to create article');
+      setBusy(false);
+    }
+  }
+
+  const field = 'w-full rounded border border-gray-300 px-2 py-1.5 text-sm';
+  return (
+    <>
+    <div className="fixed inset-0 z-10 flex justify-end bg-black/20" onClick={onClose}>
+      <div className="h-full w-full max-w-2xl overflow-y-auto bg-white p-6 shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-4 flex items-start justify-between">
+          <h2 className="text-lg font-semibold">New article</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-700">✕</button>
+        </div>
+        {error && <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+        <label className="mb-3 block text-sm">
+          <span className="mb-1 block font-medium text-gray-600">Title</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} className={field} />
+        </label>
+        <label className="mb-3 block text-sm">
+          <span className="mb-1 block font-medium text-gray-600">Question</span>
+          <textarea value={question} onChange={(e) => setQuestion(e.target.value)} rows={3} className={field} />
+        </label>
+        <label className="mb-3 block text-sm">
+          <span className="mb-1 block font-medium text-gray-600">Answer</span>
+          <textarea value={answer} onChange={(e) => setAnswer(e.target.value)} rows={8} className={field} />
+        </label>
+        <label className="mb-3 block text-sm">
+          <span className="mb-1 block font-medium text-gray-600">Caveats (optional)</span>
+          <textarea value={caveats} onChange={(e) => setCaveats(e.target.value)} rows={2} className={field} />
+        </label>
+        <div className="mb-3 grid grid-cols-2 gap-3">
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-gray-600">Category</span>
+            <input value={category} onChange={(e) => setCategory(e.target.value)} className={field} />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-gray-600">Tags (comma-separated)</span>
+            <input value={tags} onChange={(e) => setTags(e.target.value)} className={field} />
+          </label>
+        </div>
+
+        {/* Photos */}
+        <div className="mb-4">
+          <span className="mb-1 block text-sm font-medium text-gray-600">Photos</span>
+          <input type="file" accept="image/*" multiple onChange={(e) => void onAddFiles(e.target.files)} className="text-sm" />
+          {photos.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-3">
+              {photos.map((src, i) => (
+                <div key={i} className="w-24">
+                  <img src={src} alt="" className="h-20 w-full rounded border border-gray-200 object-cover" />
+                  <div className="mt-1 flex gap-1">
+                    <button
+                      onClick={() => setEditingIndex(i)}
+                      className="flex-1 rounded border border-gray-300 px-1 py-0.5 text-xs text-blue-700 hover:bg-gray-50"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => setPhotos((p) => p.filter((_, j) => j !== i))}
+                      className="flex-1 rounded border border-gray-300 px-1 py-0.5 text-xs text-gray-600 hover:bg-gray-50"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={() => void onSubmit()} disabled={busy} className="rounded bg-blue-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40">
+            {busy ? 'Publishing…' : 'Publish article'}
+          </button>
+          <button onClick={onClose} className="rounded border border-gray-300 px-3 py-1.5 text-sm">Cancel</button>
+        </div>
+      </div>
+    </div>
+
+      {/* Editor sits outside the backdrop so clicks inside it don't close the drawer. */}
+      {editingIndex != null && photos[editingIndex] && (
+        <Suspense
+          fallback={
+            <div className="fixed inset-0 z-50 grid place-items-center bg-black/70 text-sm text-white">Loading editor…</div>
+          }
+        >
+          <ImageEditorModal
+            source={photos[editingIndex]}
+            onClose={() => setEditingIndex(null)}
+            onSave={(dataUrl) => {
+              setPhotos((p) => p.map((x, j) => (j === editingIndex ? dataUrl : x)));
+              setEditingIndex(null);
+            }}
+          />
+        </Suspense>
+      )}
+    </>
   );
 }
 

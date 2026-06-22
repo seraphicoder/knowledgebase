@@ -530,6 +530,21 @@ export function getKbArticle(
   return request(`/api/kb/${id}`);
 }
 
+// Author an article from scratch (no ticket). Photos are passed as data URLs.
+export interface NewArticleInput {
+  title: string;
+  question: string;
+  answer: string;
+  caveats?: string;
+  category?: string;
+  tags?: string[];
+  images?: { dataUrl: string }[];
+}
+
+export function createArticle(input: NewArticleInput): Promise<{ id: string }> {
+  return request('/api/kb/articles', { method: 'POST', body: JSON.stringify(input) });
+}
+
 export function searchKb(q: string): Promise<{ mode: 'semantic' | 'keyword'; results: KbSearchResult[] }> {
   return request('/api/kb/search', { method: 'POST', body: JSON.stringify({ q }) });
 }
