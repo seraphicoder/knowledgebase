@@ -94,6 +94,8 @@ export class ZendeskConnector implements Connector {
     const limit = options?.limit;
     const isKnown = options?.isKnown;
     const conversations: RawConversation[] = [];
+    const scannedIds: number[] = [];
+    let skipped = 0;
     let after = cursor;
     let hasMore = true;
 
@@ -101,9 +103,13 @@ export class ZendeskConnector implements Connector {
       const size = limit === undefined ? PAGE_MAX : Math.min(limit - conversations.length, PAGE_MAX);
       const page = await this.get<TicketsCursorResponse>(this.ticketsPagePath(size, after));
       for (const ticket of page.tickets) {
+        scannedIds.push(ticket.id);
         // Already-ingested tickets are skipped cheaply (no comment/image fetch)
         // and don't count toward the limit — the cursor still advances past them.
-        if (isKnown && (await isKnown(String(ticket.id)))) continue;
+        if (isKnown && (await isKnown(String(ticket.id)))) {
+          skipped++;
+          continue;
+        }
         const comments = await this.fetchComments(ticket.id);
         conversations.push(await this.toConversation(ticket, comments));
         await sleep(RATE_LIMIT_DELAY_MS);
@@ -116,7 +122,12 @@ export class ZendeskConnector implements Connector {
     // `after` is the forward resume token (advances past the last record at the
     // end of history). Keep it so the next run fetches only newer tickets.
     log.info('Zendesk fetch complete', {
-      tickets: conversations.length, limit: limit ?? null, hasMore, nextCursor: after ?? null,
+      cursorIn: cursor ?? null,
+      scannedIds: scannedIds.slice(0, 60),
+      newCount: conversations.length,
+      skippedKnown: skipped,
+      hasMore,
+      nextCursor: after ?? null,
     });
     return { conversations, nextCursor: after, hasMore };
   }

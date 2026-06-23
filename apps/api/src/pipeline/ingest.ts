@@ -74,6 +74,7 @@ export async function ingestSource(
   log.info('source ingestion complete', {
     sourceId: source.id,
     type: source.type,
+    cursorIn: cursor,
     conversations: page.conversations.length,
     threads: threads.length,
     limit: options.limit ?? null,
