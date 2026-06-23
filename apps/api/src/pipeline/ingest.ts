@@ -34,10 +34,23 @@ export async function ingestSource(
     .single();
   const cursor = (row?.sync_cursor as string | null) ?? null;
 
+  // Cheap existence check so the connector skips already-ingested records (no
+  // expensive per-item fetch) while still walking the cursor forward to the end —
+  // makes a re-walk after a cursor reset fast and duplicate-free.
+  const isKnown = async (externalId: string): Promise<boolean> => {
+    const { count } = await db
+      .from('email_threads')
+      .select('id', { count: 'exact', head: true })
+      .eq('org_id', source.org_id)
+      .eq('source_id', source.id)
+      .eq('external_thread_id', externalId);
+    return (count ?? 0) > 0;
+  };
+
   const connector = createConnector(source);
   const startedAt = new Date();
 
-  const page = await connector.fetchConversations(cursor, { limit: options.limit });
+  const page = await connector.fetchConversations(cursor, { limit: options.limit, isKnown });
   const threads = reconstructThreads(page.conversations, source.type);
   const cleaned = threads.map(filterThread);
   const result = await storeThreads(cleaned, { orgId: source.org_id, sourceId: source.id });

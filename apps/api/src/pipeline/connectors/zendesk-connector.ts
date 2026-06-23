@@ -92,6 +92,7 @@ export class ZendeskConnector implements Connector {
   // even at the end, so a later run picks up only newer tickets.
   async fetchConversations(cursor: string | null, options?: FetchOptions): Promise<FetchPage> {
     const limit = options?.limit;
+    const isKnown = options?.isKnown;
     const conversations: RawConversation[] = [];
     let after = cursor;
     let hasMore = true;
@@ -100,6 +101,9 @@ export class ZendeskConnector implements Connector {
       const size = limit === undefined ? PAGE_MAX : Math.min(limit - conversations.length, PAGE_MAX);
       const page = await this.get<TicketsCursorResponse>(this.ticketsPagePath(size, after));
       for (const ticket of page.tickets) {
+        // Already-ingested tickets are skipped cheaply (no comment/image fetch)
+        // and don't count toward the limit — the cursor still advances past them.
+        if (isKnown && (await isKnown(String(ticket.id)))) continue;
         const comments = await this.fetchComments(ticket.id);
         conversations.push(await this.toConversation(ticket, comments));
         await sleep(RATE_LIMIT_DELAY_MS);

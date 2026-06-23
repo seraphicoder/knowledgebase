@@ -33,11 +33,19 @@ export interface RawAttachment {
 
 export interface FetchOptions {
   /**
-   * Cap the number of conversations pulled in this run. Used to walk a large
-   * backlog in batches instead of one sweep. Connectors must stop fetching once
-   * the cap is reached, not fetch everything and truncate.
+   * Cap the number of NEW conversations pulled in this run. Used to walk a large
+   * backlog in batches instead of one sweep.
    */
   limit?: number;
+  /**
+   * Forward-sync skip check. When provided, the connector SKIPS records already
+   * ingested — using a cheap id/existence check, BEFORE any expensive per-item
+   * fetch — and does not count them toward `limit`. It keeps moving forward and
+   * the cursor still advances past them, so a re-walk of known history (e.g.
+   * after a cursor reset) is cheap and reports zero duplicates. Records that pass
+   * the check are genuinely new and fetched in full.
+   */
+  isKnown?: (externalId: string) => Promise<boolean> | boolean;
 }
 
 export interface FetchPage {

@@ -110,6 +110,28 @@ describe('zendesk-connector', () => {
     expect(nextCursor).toBe('NEXT'); // resume token for the next (older) batch
   });
 
+  it('skips already-known tickets cheaply and advances the cursor past them', async () => {
+    let commentCalls = 0;
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes('/api/v2/tickets.json')) return jsonResponse(cursorPage([ticket(1), ticket(2), ticket(3)], 'END', false));
+      if (url.includes('/comments.json')) {
+        commentCalls++;
+        return jsonResponse({ comments: [], next_page: null });
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { conversations, nextCursor, hasMore } = await connector().fetchConversations(null, {
+      isKnown: (id) => id === '1' || id === '2', // 1 and 2 already ingested; 3 is new
+    });
+    expect(conversations.map((c) => c.externalId)).toEqual(['3']);
+    expect(commentCalls).toBe(1); // only the new ticket triggered the expensive fetch
+    expect(hasMore).toBe(false);
+    expect(nextCursor).toBe('END'); // cursor advanced past the skipped known tickets
+  });
+
   it('passes the cursor through as page[after] to resume forward', async () => {
     let sawAfter: string | null = null;
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
